@@ -1,0 +1,33 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - revive
+    - exhaustive
+    - errorlint
+    - nilerr
+    - wrapcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters-settings:
+  wrapcheck:
+    ignorePackageGlobs:
+      - "fmt"
+      - "os"
+      - "io"
+      - "errors"
+      - "net/*"
+      - "path/filepath"
+      - "strings"
+      - "bytes"
+  exhaustive:
+    default-signifies-exhaustive: true

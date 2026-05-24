@@ -1,0 +1,38 @@
+version: 2
+
+project_name: aimd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "aimd_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - repository:
+      owner: CyberSecAuto-Labs
+      name: homebrew-tap
+    description: "Private AI context overlays for Git repositories"
+
+nfpms:
+  - formats:
+      - deb
+      - rpm
