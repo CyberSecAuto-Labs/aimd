@@ -1,0 +1,18 @@
+# systemd user service template for aimd watch.
+# Install:
+#   cp docs/aimd.service ~/.config/systemd/user/aimd.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now aimd.service
+
+[Unit]
+Description=aimd watch — private AI context overlay sync
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aimd watch
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
