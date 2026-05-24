@@ -1,0 +1,16 @@
+# Build output
+aimd
+dist/
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
