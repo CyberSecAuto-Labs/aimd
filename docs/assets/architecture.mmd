@@ -11,9 +11,10 @@ config:
 ---
 flowchart TB
     subgraph A["Machine A"]
-        projA["📁 Project‎ ‎ ‎ ‎ ‎ ‎ <br>└ CLAUDE.md"]
+        projA["📁 Project‎ ‎ ‎ ‎ ‎ ‎ <br>└CLAUDE.md"]
         storeA["🔒 Private Store<br>~/.aimd/store/"]
-        projA <-.->|"aimd track"| storeA
+        projA -->|"aimd track"| storeA
+        projA <-.->|"🔗 symlink"| storeA
     end
 
     storeA -->|"aimd sync"| remote(["☁️ Private Git Remote<br>GitHub · GitLab ·<br>self-hosted"])
@@ -21,6 +22,7 @@ flowchart TB
 
     subgraph B["‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ Machine B"]
         storeB["🔒 Private Store<br>~/.aimd/store/"]
-        projB["📁 Project<br>CLAUDE.md"]
-        storeB <-.->|"aimd restore"| projB
+        projB["📁 Project‎ ‎ ‎ ‎ ‎ ‎ <br>└CLAUDE.md"]
+        storeB -->|"aimd restore"| projB
+        storeB <-.->|"🔗 symlink"| projB
     end
