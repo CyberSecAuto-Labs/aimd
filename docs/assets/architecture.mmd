@@ -1,0 +1,26 @@
+---
+config:
+  look: handDrawn
+  themeVariables:
+    theme: "base"
+    fontFamily: "\"Marker Felt\", cursive"
+  flowchart:
+    subGraphTitleMargin:
+      top: 10
+      bottom: 10
+---
+flowchart TB
+    subgraph A["Machine A"]
+        projA["📁 Project‎ ‎ ‎ ‎ ‎ ‎ <br>└ CLAUDE.md"]
+        storeA["🔒 Private Store<br>~/.aimd/store/"]
+        projA <-.->|"aimd track"| storeA
+    end
+
+    storeA -->|"aimd sync"| remote(["☁️ Private Git Remote<br>GitHub · GitLab ·<br>self-hosted"])
+    remote -->|"aimd restore"| storeB
+
+    subgraph B["‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎ Machine B"]
+        storeB["🔒 Private Store<br>~/.aimd/store/"]
+        projB["📁 Project<br>CLAUDE.md"]
+        storeB <-.->|"aimd restore"| projB
+    end
