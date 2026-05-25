@@ -1,0 +1,27 @@
+<!-- macOS background service template for aimd watch. Install: cp docs/launchd.plist ~/Library/LaunchAgents/com.aimd.plist && launchctl load ~/Library/LaunchAgents/com.aimd.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aimd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/aimd</string>
+        <string>watch</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/aimd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/aimd.err.log</string>
+</dict>
+</plist>
