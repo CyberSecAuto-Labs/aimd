@@ -12,22 +12,11 @@ linters:
     - errorlint
     - nilerr
     - wrapcheck
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-linters-settings:
-  wrapcheck:
-    ignorePackageGlobs:
-      - "fmt"
-      - "os"
-      - "io"
-      - "errors"
-      - "net/*"
-      - "path/filepath"
-      - "strings"
-      - "bytes"
-  exhaustive:
-    default-signifies-exhaustive: true
