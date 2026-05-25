@@ -18,7 +18,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "aimd",
-	Short: "Private AI context overlays for Git repositories",
+	Short: "Private AI .md files for Git repositories",
 	Long: `aimd lets developers track AI context files (such as CLAUDE.md) in a
 private Git store and sync them across machines — without committing those
 files to the project repository.
