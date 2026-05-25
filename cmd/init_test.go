@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,11 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/cmd"
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
 )
+
+// errReader is an io.Reader that always returns the given error.
+type errReader struct{ err error }
+
+func (r errReader) Read(_ []byte) (int, error) { return 0, r.err }
 
 // makeBarRepo creates a bare git repository at dir/remote and returns its path.
 func makeBarRepo(t *testing.T, dir string) string {
@@ -265,6 +271,75 @@ func TestRunInit_AlreadyInitialisedDifferentURL_Decline(t *testing.T) {
 	}
 	if cfg.Remote != "git@github.com:old/store.git" {
 		t.Errorf("config.Remote changed unexpectedly to %q", cfg.Remote)
+	}
+}
+
+func TestRunInit_StdinReadError(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	storeDir := filepath.Join(baseDir, "store")
+	cfgPath := filepath.Join(baseDir, "config")
+
+	var out bytes.Buffer
+	// errReader returns a non-EOF error, triggering the "reading store URL" error path.
+	in := errReader{err: errors.New("stdin broken")}
+
+	err := cmd.RunInit("", storeDir, "machine", cfgPath, false, in, &out)
+	if err == nil {
+		t.Fatal("RunInit() expected error when stdin read fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading store URL") {
+		t.Errorf("error = %q, want it to contain 'reading store URL'", err.Error())
+	}
+}
+
+func TestRunInit_ConfirmReadError(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	storeDir := filepath.Join(baseDir, "store")
+	cfgPath := filepath.Join(baseDir, "config")
+
+	// Pre-write config with a different remote so the confirmation prompt is shown.
+	existingCfg := &config.Config{
+		Remote:      "git@github.com:old/store.git",
+		MachineName: "old-machine",
+		LinkMode:    "symlink",
+	}
+	if err := config.Save(cfgPath, existingCfg); err != nil {
+		t.Fatalf("pre-writing config: %v", err)
+	}
+
+	var out bytes.Buffer
+	in := errReader{err: errors.New("stdin broken")}
+
+	err := cmd.RunInit("git@github.com:new/store.git", storeDir, "machine", cfgPath, false, in, &out)
+	if err == nil {
+		t.Fatal("RunInit() expected error when confirmation read fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "reading confirmation") {
+		t.Errorf("error = %q, want it to contain 'reading confirmation'", err.Error())
+	}
+}
+
+func TestRunInit_CloneOrInitFails(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	// Place a file at storeDir so git clone AND git init both fail.
+	storeDir := filepath.Join(baseDir, "store")
+	if err := os.WriteFile(storeDir, []byte("block"), 0o600); err != nil {
+		t.Fatalf("creating blocking file: %v", err)
+	}
+	cfgPath := filepath.Join(baseDir, "config")
+
+	var out bytes.Buffer
+	in := strings.NewReader("")
+
+	err := cmd.RunInit("/nonexistent/invalid/url", storeDir, "machine", cfgPath, false, in, &out)
+	if err == nil {
+		t.Fatal("RunInit() expected error when store dir is a file, got nil")
 	}
 }
 
