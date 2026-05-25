@@ -33,7 +33,7 @@ The tracked file stays available in your project directory (via symlink), is hid
 No server. No daemon. No cloud dependency beyond a standard Git remote (GitHub, GitLab, Gitea, or self-hosted).
 
 <p align="center">
-  <img src="docs/assets/architecture.png" alt="Architecture" width="300" />
+  <img src="docs/assets/architecture.svg" alt="Architecture" width="300" />
 </p>
 
 ## Status
