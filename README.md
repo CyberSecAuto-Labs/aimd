@@ -1,6 +1,7 @@
 # aimd
 
-> **⚠️ Work in progress — not ready for use.** This project is under active development. APIs, commands, and file formats will change without notice.
+> [!WARNING]
+> **Work in progress — not ready for use.** This project is under active development. APIs, commands, and file formats will change without notice.
 
 Track, sync, and restore your AI .md files across machines without committing them to your project repository.
 
@@ -31,9 +32,13 @@ The tracked file stays available in your project directory (via symlink), is hid
 
 No server. No daemon. No cloud dependency beyond a standard Git remote (GitHub, GitLab, Gitea, or self-hosted).
 
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="Architecture" width="300" />
+</p>
+
 ## Status
 
-The core overlay manager is under development.
+The core file tracking and sync engine is under development.
 
 | Command | Status |
 |---|---|
