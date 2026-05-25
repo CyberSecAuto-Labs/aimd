@@ -159,6 +159,61 @@ func TestSave_OverwritesExistingFile(t *testing.T) {
 	}
 }
 
+func TestLoad_UnreadableFile(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping as root: read restrictions do not apply")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config")
+
+	// Write a valid config file, then remove read permission.
+	cfg := &config.Config{Remote: "git@github.com:u/s.git", MachineName: "m", LinkMode: "symlink"}
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("Load() expected error for unreadable file, got nil")
+	}
+	if errors.Is(err, config.ErrNotFound) {
+		t.Error("Load() returned ErrNotFound for unreadable file, want permission error")
+	}
+}
+
+func TestSave_DestinationIsDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// Make the destination path an existing directory — os.Rename(file, dir) fails.
+	configPath := filepath.Join(dir, "config")
+	if err := os.Mkdir(configPath, 0o700); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	cfg := &config.Config{Remote: "git@github.com:u/s.git", MachineName: "m", LinkMode: "symlink"}
+	err := config.Save(configPath, cfg)
+	if err == nil {
+		t.Fatal("Save() expected error when destination is a directory, got nil")
+	}
+	// The temp file should have been cleaned up by the defer.
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("ReadDir() error = %v", readErr)
+	}
+	for _, e := range entries {
+		if e.Name() != "config" {
+			t.Errorf("unexpected leftover file after failed Save: %q", e.Name())
+		}
+	}
+}
+
 func TestSave_UnwritableDirectory(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping as root: write restrictions do not apply")
