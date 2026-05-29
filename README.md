@@ -43,7 +43,7 @@ The core file tracking and sync engine is under development.
 | Command | Status |
 |---|---|
 | `aimd init` | ✅ implemented |
-| `aimd track` | 🚧 not yet implemented |
+| `aimd track` | ✅ implemented |
 | `aimd untrack` | 🚧 not yet implemented |
 | `aimd sync` | 🚧 not yet implemented |
 | `aimd restore` | 🚧 not yet implemented |
