@@ -143,7 +143,7 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 		return fmt.Errorf("committing to store: %w", err)
 	}
 	if err := store.Push(storeDir); err != nil {
-		_, _ = fmt.Fprintf(out, "warning: could not push to remote (offline or no upstream configured). Run `git push` manually.\n  (%s)\n", err)
+		_, _ = fmt.Fprintf(out, "warning: could not push to remote. Run `git -C %s push` manually.\n  (%s)\n", storeDir, err)
 	}
 
 	return nil
