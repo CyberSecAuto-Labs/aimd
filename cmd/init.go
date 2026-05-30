@@ -143,7 +143,7 @@ func cloneOrInit(url, storeDir string) error {
 
 // gitLocalInit runs `git init` in storeDir and adds url as the origin remote.
 func gitLocalInit(url, storeDir string) error {
-	if out, err := exec.Command("git", "init", storeDir).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "init", "-b", "main", storeDir).CombinedOutput(); err != nil {
 		return fmt.Errorf("git init: %w — %s", err, strings.TrimSpace(string(out)))
 	}
 	if out, err := exec.Command("git", "-C", storeDir, "remote", "add", "origin", url).CombinedOutput(); err != nil {
