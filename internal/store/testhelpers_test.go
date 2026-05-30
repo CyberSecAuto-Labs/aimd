@@ -6,9 +6,11 @@ import (
 )
 
 // initGitRepo initialises a bare or regular git repo in dir.
+// -b main pins the default branch so tests are independent of the runner's
+// init.defaultBranch setting (macOS CI defaults to 'master').
 func initGitRepo(t *testing.T, dir string, bare bool) {
 	t.Helper()
-	args := []string{"init"}
+	args := []string{"init", "-b", "main"}
 	if bare {
 		args = append(args, "--bare")
 	}
