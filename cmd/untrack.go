@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
+	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
 var (
@@ -118,8 +118,11 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 	}
 
 	// Step 8: git add + commit + push.
-	if err := untrackStoreCommit(storeDir, proj.Key, proj.Root, machineName, out); err != nil {
-		return err
+	if err := store.Commit(storeDir, proj.Key, proj.Root, "untrack", machineName); err != nil {
+		return fmt.Errorf("committing to store: %w", err)
+	}
+	if err := store.Push(storeDir); err != nil {
+		_, _ = fmt.Fprintf(out, "warning: could not push to remote (offline or no upstream configured). Run `git push` manually.\n  (%s)\n", err)
 	}
 
 	return nil
@@ -271,42 +274,6 @@ func confirmPrompt(out io.Writer, in io.Reader, msg string) (bool, error) {
 	// Ignore read errors (EOF, no input) — treat as "N".
 	_, _ = fmt.Fscan(in, &answer)
 	return strings.ToLower(strings.TrimSpace(answer)) == "y", nil
-}
-
-// untrackStoreCommit stages changed files and commits them to the store repo.
-func untrackStoreCommit(storeDir, projectKey, projectRoot, machineName string, out io.Writer) error {
-	// Stage relevant files.
-	registryRel := filepath.Join(".aimd", "registry.json")
-	reposRel := filepath.Join("repos", projectKey)
-	metaRel := filepath.Join("metadata", projectKey+".json")
-
-	addOut, err := exec.Command("git", "-C", storeDir, "add",
-		registryRel, reposRel, metaRel).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git add: %w — %s", err, strings.TrimSpace(string(addOut)))
-	}
-
-	commitMsg := fmt.Sprintf("untrack: %s [%s %s]",
-		filepath.Base(projectRoot), machineName, time.Now().UTC().Format(time.RFC3339))
-	commitCmd := exec.Command("git",
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"commit", "-m", commitMsg,
-	)
-	commitOut, err := commitCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(commitOut)))
-	}
-
-	// Push — non-fatal (offline or no upstream configured).
-	pushOut, err := exec.Command("git", "-C", storeDir, "push", "origin", "HEAD:main").CombinedOutput()
-	if err != nil {
-		_, _ = fmt.Fprintf(out, "warning: could not push to remote (offline or no upstream configured). Run `git push` manually.\n  (%s)\n",
-			strings.TrimSpace(string(pushOut)))
-	}
-
-	return nil
 }
 
 func init() {
