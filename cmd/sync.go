@@ -139,18 +139,30 @@ func syncProject(
 	case store.StateAhead:
 		// We are ahead — stage modified overlays and push if there's anything to commit.
 
-		// Build commit message: "sync: <project>/<files> [<machine> <timestamp>]"
+		// Build commit message.
+		// Title: "sync: <project> [<machine> <timestamp>]"
+		// Body:  "Synced files:\n  <file>\n  ..."
 		files := trackedFilePaths(projEntry)
-		var filesStr string
+		title := fmt.Sprintf("sync: %s [%s %s]",
+			displayName, machineName,
+			time.Now().UTC().Format(time.RFC3339))
+
+		var msg string
 		if len(files) > 0 {
-			filesStr = strings.Join(files, ",")
+			var sb strings.Builder
+			sb.WriteString(title)
+			sb.WriteString("\n\nSynced files:\n")
+			for _, f := range files {
+				sb.WriteString("  ")
+				sb.WriteString(f)
+				sb.WriteString("\n")
+			}
+			msg = sb.String()
 		} else {
-			filesStr = "(no tracked files)"
+			msg = title
 		}
 
-		msg := fmt.Sprintf("sync: %s/%s [%s %s]",
-			displayName, filesStr, machineName,
-			time.Now().UTC().Format(time.RFC3339))
+		filesStr := strings.Join(files, ", ")
 
 		// CommitMsg stages repos/<key>/ (-u) and commits with the sync message.
 		// Returns an error if nothing was staged (nothing to commit).
