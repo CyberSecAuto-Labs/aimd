@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -140,25 +138,6 @@ func syncProject(
 
 	case store.StateAhead:
 		// We are ahead — stage modified overlays and push if there's anything to commit.
-		reposPath := filepath.Join("repos", projectKey)
-
-		// Stage modified overlay files — only if the repos/<key>/ path exists in the store.
-		reposAbsPath := filepath.Join(storeDir, reposPath)
-		if _, statErr := os.Stat(reposAbsPath); statErr == nil {
-			addOut, addErr := exec.Command("git", "-C", storeDir, "add", "-u", "--", reposPath).CombinedOutput()
-			if addErr != nil {
-				return fmt.Errorf("git add -u: %w — %s", addErr, strings.TrimSpace(string(addOut)))
-			}
-		}
-
-		// Check if there's anything staged.
-		diffErr := exec.Command("git", "-C", storeDir, "diff", "--cached", "--quiet").Run()
-		if diffErr == nil {
-			// Nothing staged — nothing to sync.
-			_, _ = fmt.Fprintf(out, "✓ %s: nothing to sync\n", displayName)
-			updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
-			return nil
-		}
 
 		// Build commit message: "sync: <project>/<files> [<machine> <timestamp>]"
 		files := trackedFilePaths(projEntry)
@@ -173,19 +152,20 @@ func syncProject(
 			displayName, filesStr, machineName,
 			time.Now().UTC().Format(time.RFC3339))
 
-		commitOut, commitErr := exec.Command("git",
-			"-C", storeDir,
-			"-c", "user.email=aimd@localhost",
-			"-c", "user.name=aimd",
-			"commit", "-m", msg,
-		).CombinedOutput()
-		if commitErr != nil {
-			return fmt.Errorf("git commit: %w — %s", commitErr, strings.TrimSpace(string(commitOut)))
+		// CommitMsg stages repos/<key>/ (-u) and commits with the sync message.
+		// Returns an error if nothing was staged (nothing to commit).
+		if commitErr := store.CommitMsg(storeDir, projectKey, msg); commitErr != nil {
+			if isNothingToCommit(commitErr) {
+				_, _ = fmt.Fprintf(out, "✓ %s: nothing to sync\n", displayName)
+				updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
+				return nil
+			}
+			return fmt.Errorf("committing to store: %w", commitErr)
 		}
 
 		// Push (warn on failure, don't fail).
 		if pushErr := store.Push(storeDir); pushErr != nil {
-			_, _ = fmt.Fprintf(out, "warning: could not push to remote. Run `git push` manually.\n  (%s)\n", pushErr)
+			_, _ = fmt.Fprintf(out, "warning: could not push to remote. Run `git -C %s push` manually.\n  (%s)\n", storeDir, pushErr)
 		} else {
 			_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, filesStr)
 		}
@@ -221,6 +201,17 @@ func updateLastSeen(proj *registry.Project, machineName, localPath string, reg *
 		LastSeen:  time.Now().UTC(),
 	})
 	_ = registry.Save(registryPath, reg)
+}
+
+// isNothingToCommit returns true when the error from CommitMsg indicates that
+// git exited because there was nothing staged, not because of a real failure.
+// Git uses two variants: "nothing to commit" and "nothing added to commit".
+func isNothingToCommit(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "nothing to commit") || strings.Contains(msg, "nothing added to commit")
 }
 
 func init() {
