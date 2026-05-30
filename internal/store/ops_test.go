@@ -164,8 +164,8 @@ func TestPush(t *testing.T) {
 		t.Fatalf("store.Push: %v", err)
 	}
 
-	// Verify the bare repo received the commit.
-	bareLog := gitRun(t, bareDir, "log", "--format=%s", "-1")
+	// Verify the bare repo received the commit on main.
+	bareLog := gitRun(t, bareDir, "log", "main", "--format=%s", "-1")
 	pattern := regexp.MustCompile(`^track: testproject \[mymachine `)
 	if !pattern.MatchString(bareLog) {
 		t.Errorf("bare repo commit message %q does not match expected pattern", bareLog)
