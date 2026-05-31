@@ -126,9 +126,17 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 	return nil
 }
 
-// cloneOrInit tries `git clone <url> <storeDir>`. If that fails (empty/new
-// remote), it falls back to `git init` + `git remote add origin <url>`.
+// cloneOrInit sets up the store at storeDir from the given remote URL.
+// If storeDir already contains a git repo, it ensures the remote URL is
+// correct without re-cloning — this handles re-runs and store recovery.
+// Otherwise it tries git clone; if the remote is empty/unreachable it falls
+// back to git init + remote add.
 func cloneOrInit(url, storeDir string) error {
+	// Existing git repo: skip clone, just fix the remote if needed.
+	if _, err := os.Stat(filepath.Join(storeDir, ".git")); err == nil {
+		return ensureRemote(url, storeDir)
+	}
+
 	cloneOut, err := exec.Command("git", "clone", url, storeDir).CombinedOutput()
 	if err == nil {
 		return nil
@@ -137,6 +145,26 @@ func cloneOrInit(url, storeDir string) error {
 	if initErr := gitLocalInit(url, storeDir); initErr != nil {
 		return fmt.Errorf("clone failed (%s) and local init also failed: %w",
 			strings.TrimSpace(string(cloneOut)), initErr)
+	}
+	return nil
+}
+
+// ensureRemote makes sure the git repo at storeDir has origin pointing to url.
+// If origin already points to url it is a no-op. If origin exists with a
+// different URL it is updated. If no origin exists one is added.
+func ensureRemote(url, storeDir string) error {
+	out, err := exec.Command("git", "-C", storeDir, "remote", "get-url", "origin").CombinedOutput()
+	if err == nil {
+		if strings.TrimSpace(string(out)) == url {
+			return nil
+		}
+		if out, err := exec.Command("git", "-C", storeDir, "remote", "set-url", "origin", url).CombinedOutput(); err != nil {
+			return fmt.Errorf("git remote set-url: %w — %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if out, err := exec.Command("git", "-C", storeDir, "remote", "add", "origin", url).CombinedOutput(); err != nil {
+		return fmt.Errorf("git remote add origin: %w — %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

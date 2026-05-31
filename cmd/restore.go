@@ -43,6 +43,14 @@ file. Use --force to replace real files with store overlays.`,
 // dryRun prints what would happen without making changes.
 // out receives all user-facing output.
 func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer) error {
+	// Pre-check: store must exist and be a git repo before anything else.
+	if _, statErr := os.Stat(storeDir); os.IsNotExist(statErr) {
+		return fmt.Errorf("store not found at %s — run `aimd init` first", storeDir)
+	}
+	if _, statErr := os.Stat(filepath.Join(storeDir, ".git")); os.IsNotExist(statErr) {
+		return fmt.Errorf("store at %s is not a git repository — run `aimd init` first", storeDir)
+	}
+
 	// Step 1: Pull the store (warn on failure, continue).
 	pullOut, pullErr := exec.Command("git", "-C", storeDir, "pull", "--ff-only", "origin", "main").CombinedOutput()
 	if pullErr != nil {
@@ -129,7 +137,13 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 			continue
 		}
 
-		// State 4: real file → warn unless --force.
+		// State 4a: directory at destination → always skip, even with --force.
+		if fi.IsDir() {
+			_, _ = fmt.Fprintf(out, "warning: %s is a directory; remove it manually to restore the symlink\n", tf.Path)
+			continue
+		}
+
+		// State 4b: real file → warn unless --force.
 		if !force {
 			_, _ = fmt.Fprintf(out, "warning: %s is a real file; use --force to replace with store overlay\n", tf.Path)
 			continue
