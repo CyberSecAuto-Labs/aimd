@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,7 +61,7 @@ func makeRestoreStore(t *testing.T, storeDir, projectKey, _ string, trackedFiles
 		if i > 0 {
 			trackedJSON.WriteString(",")
 		}
-		trackedJSON.WriteString(`{"path":"` + f + `","addedAt":"` + now + `","addedBy":"other-machine"}`)
+		_, _ = fmt.Fprintf(&trackedJSON, `{"path":%q,"addedAt":%q,"addedBy":"other-machine"}`, f, now)
 	}
 
 	regJSON := `{"version":1,"projects":{"` + projectKey + `":{"displayName":"myapp","remoteUrl":"git@github.com:test/myapp.git","machines":{},"tracked":[` + trackedJSON.String() + `]}}}` + "\n"
