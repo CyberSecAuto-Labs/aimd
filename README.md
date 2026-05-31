@@ -46,7 +46,7 @@ The core file tracking and sync engine is under development.
 | `aimd track` | ✅ implemented |
 | `aimd untrack` | ✅ implemented |
 | `aimd sync` | ✅ implemented |
-| `aimd restore` | 🚧 not yet implemented |
+| `aimd restore` | ✅ implemented |
 | `aimd status` | 🚧 not yet implemented |
 | `aimd watch` | 🚧 not yet implemented |
 | `aimd resolve` | 🚧 not yet implemented |
