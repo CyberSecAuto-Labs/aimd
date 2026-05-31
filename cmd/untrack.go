@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,13 +87,24 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 		}
 	}
 
-	// Step 4: Process each target file.
+	// Step 4: Process each target file; collect relative paths for the commit body.
 	var processed int
+	var untrackedRelPaths []string
 	for _, target := range targets {
 		if err := untrackFile(target, proj.Root, proj.Key, storeDir, machineName, linkMode, projEntry, deleteMode, yes, dryRun, in, out); err != nil {
 			return err
 		}
 		processed++
+		// Compute relative path for the commit body.
+		abs := target
+		if !filepath.IsAbs(abs) {
+			if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+				abs = filepath.Join(cwd, target)
+			}
+		}
+		if relPath, relErr := filepath.Rel(proj.Root, abs); relErr == nil {
+			untrackedRelPaths = append(untrackedRelPaths, relPath)
+		}
 	}
 
 	if dryRun {
@@ -118,11 +130,16 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 	}
 
 	// Step 8: git add + commit + push.
-	if err := store.Commit(storeDir, proj.Key, proj.Root, "untrack", machineName); err != nil {
+	if err := store.Commit(storeDir, proj.Key, proj.Root, "untrack", machineName, untrackedRelPaths); err != nil {
 		return fmt.Errorf("committing to store: %w", err)
 	}
-	if err := store.Push(storeDir); err != nil {
-		_, _ = fmt.Fprintf(out, "warning: could not push to remote. Run `git -C %s push` manually.\n  (%s)\n", storeDir, err)
+	if pushErr := store.Push(storeDir); pushErr != nil {
+		var pe *store.PushError
+		if errors.As(pushErr, &pe) && !pe.Transient {
+			_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
+		} else {
+			_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
+		}
 	}
 
 	return nil

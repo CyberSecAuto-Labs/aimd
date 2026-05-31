@@ -177,7 +177,12 @@ func syncProject(
 
 		// Push (warn on failure, don't fail).
 		if pushErr := store.Push(storeDir); pushErr != nil {
-			_, _ = fmt.Fprintf(out, "warning: could not push to remote. Run `git -C %s push` manually.\n  (%s)\n", storeDir, pushErr)
+			var pe *store.PushError
+			if errors.As(pushErr, &pe) && !pe.Transient {
+				_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
+			} else {
+				_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
+			}
 		} else {
 			_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, filesStr)
 		}
