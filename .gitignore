@@ -3,7 +3,7 @@ aimd
 dist/
 
 # Test coverage
-coverage.out
+coverage*.out
 coverage.html
 
 # IDE
