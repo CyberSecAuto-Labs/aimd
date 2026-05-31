@@ -417,3 +417,90 @@ func TestRunRestore_RealFile_Force(t *testing.T) {
 		t.Errorf("symlink target = %q, want %q", target, overlaySrc)
 	}
 }
+
+func TestRunRestore_StoreNotInitialized(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store-does-not-exist")
+
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeProjectRepo(t, projectDir)
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	err = cmd.RunRestore(storeDir, "test-machine", false, false, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when store does not exist, got nil")
+	}
+	if !strings.Contains(err.Error(), "aimd init") {
+		t.Errorf("error should mention 'aimd init', got: %v", err)
+	}
+}
+
+func TestRunRestore_DirectoryAtDestination(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	makeProjectRepo(t, projectDir)
+	if err := exec.Command("git", "-C", projectDir, "remote", "add", "origin",
+		"git@github.com:test/myapp.git").Run(); err != nil {
+		t.Fatalf("git remote add: %v", err)
+	}
+	makeRestoreStore(t, storeDir, "github.com~test~myapp", projectDir, []string{"CLAUDE.md"})
+
+	// Place a non-empty directory at the destination path.
+	projectDst := filepath.Join(projectDir, "CLAUDE.md")
+	if err := os.MkdirAll(projectDst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDst, "inner.txt"), []byte("contents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	var buf bytes.Buffer
+	if err := cmd.RunRestore(storeDir, "test-machine", false, false, &buf); err != nil {
+		t.Fatalf("RunRestore() unexpected error: %v", err)
+	}
+
+	// Assert: directory is still intact (not removed).
+	fi, statErr := os.Lstat(projectDst)
+	if statErr != nil {
+		t.Fatalf("Lstat CLAUDE.md: %v", statErr)
+	}
+	if !fi.IsDir() {
+		t.Error("expected CLAUDE.md directory to be left in place")
+	}
+
+	// Assert: warning was printed.
+	if !strings.Contains(buf.String(), "is a directory") {
+		t.Errorf("expected 'is a directory' warning, got: %q", buf.String())
+	}
+}
