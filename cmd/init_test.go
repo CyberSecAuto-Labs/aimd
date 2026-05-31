@@ -343,6 +343,48 @@ func TestRunInit_CloneOrInitFails(t *testing.T) {
 	}
 }
 
+func TestRunInit_ExistingGitStoreRecovery(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	remoteDir := makeBarRepo(t, baseDir)
+	storeDir := filepath.Join(baseDir, "store")
+	cfgPath := filepath.Join(baseDir, "aimd-config")
+
+	// Pre-create storeDir as a git repo with no remote — simulates a
+	// corrupted store where .git/config lost its origin entry.
+	if out, err := exec.Command("git", "init", "-b", "main", storeDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", storeDir, "config", "user.email", "aimd@localhost").CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", storeDir, "config", "user.name", "aimd").CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+
+	var out bytes.Buffer
+	in := strings.NewReader("")
+
+	if err := cmd.RunInit(remoteDir, storeDir, "test-machine", cfgPath, false, in, &out); err != nil {
+		t.Fatalf("RunInit() error = %v\noutput: %s", err, out.String())
+	}
+
+	// Verify origin remote was added.
+	gotURL, err := exec.Command("git", "-C", storeDir, "remote", "get-url", "origin").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git remote get-url origin: %v", err)
+	}
+	if strings.TrimSpace(string(gotURL)) != remoteDir {
+		t.Errorf("origin URL = %q, want %q", strings.TrimSpace(string(gotURL)), remoteDir)
+	}
+
+	// Verify registry.json was scaffolded.
+	if _, err := os.Stat(filepath.Join(storeDir, ".aimd", "registry.json")); err != nil {
+		t.Errorf("registry.json not found after recovery: %v", err)
+	}
+}
+
 func TestRunInit_LocalInit_FallbackOnCloneFailure(t *testing.T) {
 	t.Parallel()
 
