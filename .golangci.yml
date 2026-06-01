@@ -20,7 +20,7 @@ linters:
     exhaustive:
       default-signifies-exhaustive: true
     cyclop:
-      max-complexity: 40
+      max-complexity: 20
     gosec:
       excludes:
         # aimd shells out to git as its core design; subprocess args are controlled.
