@@ -41,12 +41,7 @@ Multiple paths may be given. Directories are walked recursively.`,
 // out receives all user-facing output.
 func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out io.Writer) error {
 	// Step 1: Determine link mode from config (fall back to symlink).
-	linkMode := link.LinkModeSymlink
-	if cfgPath, err := config.DefaultPath(); err == nil {
-		if cfg, err := config.Load(cfgPath); err == nil && cfg.LinkMode != "" {
-			linkMode = link.LinkMode(cfg.LinkMode)
-		}
-	}
+	linkMode := loadLinkMode()
 
 	// Step 2: Detect project (git root, key, remote URL).
 	proj, err := project.Detect()
@@ -73,39 +68,9 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 	}
 
 	// Step 4: Collect all files from targets.
-	var filePaths []string
-	for _, target := range targets {
-		// Resolve to absolute path.
-		abs := target
-		if !filepath.IsAbs(abs) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getting working directory: %w", err)
-			}
-			abs = filepath.Join(cwd, target)
-		}
-
-		fi, err := os.Lstat(abs)
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", target, err)
-		}
-
-		if fi.IsDir() {
-			// Walk directory and collect all regular files.
-			if err := filepath.WalkDir(abs, func(path string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
-				}
-				if !d.IsDir() {
-					filePaths = append(filePaths, path)
-				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("walking directory %s: %w", target, err)
-			}
-		} else {
-			filePaths = append(filePaths, abs)
-		}
+	filePaths, err := expandTargets(targets)
+	if err != nil {
+		return err
 	}
 
 	// Step 5: Track each file; collect relative paths for the commit body.
@@ -148,12 +113,7 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 		return fmt.Errorf("committing to store: %w", err)
 	}
 	if pushErr := store.Push(storeDir); pushErr != nil {
-		var pe *store.PushError
-		if errors.As(pushErr, &pe) && !pe.Transient {
-			_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
-		} else {
-			_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
-		}
+		warnOnPushError(pushErr, storeDir, out)
 	}
 
 	return nil
@@ -287,4 +247,64 @@ func writeProjectMetadata(storeDir, projectKey string, proj *registry.Project) e
 
 func init() {
 	rootCmd.AddCommand(trackCmd)
+}
+
+// warnOnPushError prints a warning when a push fails without failing the command.
+// Distinguishes hard rejections (non-transient) from transient network failures.
+func warnOnPushError(err error, storeDir string, out io.Writer) {
+	var pe *store.PushError
+	if errors.As(err, &pe) && !pe.Transient {
+		_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
+	} else {
+		_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
+	}
+}
+
+// loadLinkMode reads the configured link mode, defaulting to symlink when config is absent.
+func loadLinkMode() link.LinkMode {
+	if cfgPath, err := config.DefaultPath(); err == nil {
+		if cfg, err := config.Load(cfgPath); err == nil && cfg.LinkMode != "" {
+			return link.LinkMode(cfg.LinkMode)
+		}
+	}
+	return link.LinkModeSymlink
+}
+
+// expandTargets resolves each target (file or directory path) to a list of absolute file paths.
+// Directories are walked recursively; symlinks to directories are not followed.
+func expandTargets(targets []string) ([]string, error) {
+	var filePaths []string
+	for _, target := range targets {
+		abs := target
+		if !filepath.IsAbs(abs) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("getting working directory: %w", err)
+			}
+			abs = filepath.Join(cwd, target)
+		}
+
+		fi, err := os.Lstat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", target, err)
+		}
+
+		if !fi.IsDir() {
+			filePaths = append(filePaths, abs)
+			continue
+		}
+
+		if err := filepath.WalkDir(abs, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !d.IsDir() {
+				filePaths = append(filePaths, path)
+			}
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("walking directory %s: %w", target, err)
+		}
+	}
+	return filePaths, nil
 }

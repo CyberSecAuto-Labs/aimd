@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/CyberSecAuto-Labs/aimd/internal/config"
 	"github.com/CyberSecAuto-Labs/aimd/internal/exclude"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
@@ -56,12 +54,7 @@ the interactive confirmation prompt.`,
 // out receives all user-facing output.
 func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes, dryRun bool, in io.Reader, out io.Writer) error {
 	// Step 1: Determine link mode from config (fall back to symlink).
-	linkMode := link.LinkModeSymlink
-	if cfgPath, err := config.DefaultPath(); err == nil {
-		if cfg, err := config.Load(cfgPath); err == nil && cfg.LinkMode != "" {
-			linkMode = link.LinkMode(cfg.LinkMode)
-		}
-	}
+	linkMode := loadLinkMode()
 
 	// Step 2: Detect project (git root, key, remote URL).
 	proj, err := project.Detect()
@@ -134,12 +127,7 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 		return fmt.Errorf("committing to store: %w", err)
 	}
 	if pushErr := store.Push(storeDir); pushErr != nil {
-		var pe *store.PushError
-		if errors.As(pushErr, &pe) && !pe.Transient {
-			_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
-		} else {
-			_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
-		}
+		warnOnPushError(pushErr, storeDir, out)
 	}
 
 	return nil
@@ -147,7 +135,7 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 
 // untrackFile performs untracking of a single file.
 func untrackFile(
-	target, gitRoot, _ /* projectKey */, storeDir, machineName string,
+	target, gitRoot, _ /* projectKey */, storeDir, _ /* machineName */ string,
 	linkMode link.LinkMode,
 	proj *registry.Project,
 	deleteMode, yes, dryRun bool,
@@ -223,62 +211,51 @@ func untrackFile(
 	excludePath := filepath.Join(gitRoot, ".git", "info", "exclude")
 
 	if deleteMode {
-		// --delete: remove symlink and overlay without restoring content.
-		if err := link.RemoveLink(abs, linkMode); err != nil {
-			return fmt.Errorf("removing symlink %s: %w", relPath, err)
-		}
-
-		if err := os.Remove(overlayPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("removing overlay %s: %w", overlayPath, err)
-		}
-
-		if err := exclude.RemoveEntry(excludePath, relPath); err != nil {
-			return fmt.Errorf("removing .git/info/exclude entry for %s: %w", relPath, err)
-		}
-
-		registry.RemoveTrackedFile(proj, relPath)
-
-		_, _ = fmt.Fprintf(out, "✓ Deleted %s (removed from project and store)\n", relPath)
-	} else {
-		// --restore (default): copy overlay → project, remove symlink.
-
-		// Read overlay content (following the symlink via os.ReadFile which follows symlinks).
-		content, err := os.ReadFile(overlayPath)
-		if err != nil {
-			return fmt.Errorf("reading overlay %s: %w", overlayPath, err)
-		}
-
-		// Get the overlay file permissions.
-		overlayFi, err := os.Stat(overlayPath)
-		if err != nil {
-			return fmt.Errorf("stat overlay %s: %w", overlayPath, err)
-		}
-
-		// Remove the symlink.
-		if err := link.RemoveLink(abs, linkMode); err != nil {
-			return fmt.Errorf("removing symlink %s: %w", relPath, err)
-		}
-
-		// Write original file back at project path with same content.
-		if err := os.WriteFile(abs, content, overlayFi.Mode().Perm()); err != nil {
-			return fmt.Errorf("restoring %s to project: %w", relPath, err)
-		}
-
-		// Remove overlay file from store.
-		if err := os.Remove(overlayPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("removing overlay %s: %w", overlayPath, err)
-		}
-
-		if err := exclude.RemoveEntry(excludePath, relPath); err != nil {
-			return fmt.Errorf("removing .git/info/exclude entry for %s: %w", relPath, err)
-		}
-
-		registry.RemoveTrackedFile(proj, relPath)
-
-		_, _ = fmt.Fprintf(out, "✓ Untracked %s (restored to project)\n", relPath)
+		return deleteTrackedFile(abs, overlayPath, excludePath, relPath, linkMode, proj, out)
 	}
+	return restoreTrackedFile(abs, overlayPath, excludePath, relPath, linkMode, proj, out)
+}
 
-	_ = machineName // used in registry update at caller level
+// deleteTrackedFile removes the symlink and overlay without restoring content.
+func deleteTrackedFile(abs, overlayPath, excludePath, relPath string, linkMode link.LinkMode, proj *registry.Project, out io.Writer) error {
+	if err := link.RemoveLink(abs, linkMode); err != nil {
+		return fmt.Errorf("removing symlink %s: %w", relPath, err)
+	}
+	if err := os.Remove(overlayPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing overlay %s: %w", overlayPath, err)
+	}
+	if err := exclude.RemoveEntry(excludePath, relPath); err != nil {
+		return fmt.Errorf("removing .git/info/exclude entry for %s: %w", relPath, err)
+	}
+	registry.RemoveTrackedFile(proj, relPath)
+	_, _ = fmt.Fprintf(out, "✓ Deleted %s (removed from project and store)\n", relPath)
+	return nil
+}
+
+// restoreTrackedFile copies the overlay back to the project directory and removes the symlink and overlay.
+func restoreTrackedFile(abs, overlayPath, excludePath, relPath string, linkMode link.LinkMode, proj *registry.Project, out io.Writer) error {
+	content, err := os.ReadFile(overlayPath)
+	if err != nil {
+		return fmt.Errorf("reading overlay %s: %w", overlayPath, err)
+	}
+	overlayFi, err := os.Stat(overlayPath)
+	if err != nil {
+		return fmt.Errorf("stat overlay %s: %w", overlayPath, err)
+	}
+	if err := link.RemoveLink(abs, linkMode); err != nil {
+		return fmt.Errorf("removing symlink %s: %w", relPath, err)
+	}
+	if err := os.WriteFile(abs, content, overlayFi.Mode().Perm()); err != nil {
+		return fmt.Errorf("restoring %s to project: %w", relPath, err)
+	}
+	if err := os.Remove(overlayPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing overlay %s: %w", overlayPath, err)
+	}
+	if err := exclude.RemoveEntry(excludePath, relPath); err != nil {
+		return fmt.Errorf("removing .git/info/exclude entry for %s: %w", relPath, err)
+	}
+	registry.RemoveTrackedFile(proj, relPath)
+	_, _ = fmt.Fprintf(out, "✓ Untracked %s (restored to project)\n", relPath)
 	return nil
 }
 
