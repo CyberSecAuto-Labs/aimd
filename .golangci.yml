@@ -12,9 +12,29 @@ linters:
     - errorlint
     - nilerr
     - wrapcheck
+    - gosec
+    - gocritic
+    - testifylint
+    - cyclop
   settings:
     exhaustive:
       default-signifies-exhaustive: true
+    cyclop:
+      max-complexity: 40
+    gosec:
+      excludes:
+        # aimd shells out to git as its core design; subprocess args are controlled.
+        - G204
+        # Path variables are validated by callers; taint analysis produces false positives.
+        - G703
+        # Dotfiles and config files intentionally use 0644/0755 for shell compatibility.
+        - G301
+        - G302
+        - G306
+        # G304 (file inclusion via variable) — paths are application-controlled.
+        - G304
+        # G104 already caught by errcheck; duplicate in test helpers with //nolint:errcheck.
+        - G104
 
 formatters:
   enable:
