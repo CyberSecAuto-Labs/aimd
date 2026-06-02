@@ -30,6 +30,16 @@ func pendingPushMarkerPath(storeDir string) string {
 	return filepath.Join(storeDir, ".aimd", "pending-push")
 }
 
+// gitCmd builds an *exec.Cmd for git that forces an English/C locale so its
+// output is deterministic. All store git invocations route through this helper
+// so that callers (and substring classifiers like isPushHard) can rely on
+// English output regardless of the user's git locale.
+func gitCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	return cmd
+}
+
 // isPushHard returns true when the git output indicates a hard rejection
 // (non-transient) rather than a transient network failure.
 func isPushHard(output string) bool {
@@ -77,7 +87,7 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 	reposRel := filepath.Join("repos", projectKey)
 	metaRel := filepath.Join("metadata", projectKey+".json")
 
-	addOut, err := exec.Command("git", "-C", storeDir, "add",
+	addOut, err := gitCmd("-C", storeDir, "add",
 		registryRel, reposRel, metaRel).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git add: %w — %s", err, strings.TrimSpace(string(addOut)))
@@ -105,7 +115,7 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		msg = title
 	}
 
-	commitOut, err := exec.Command("git",
+	commitOut, err := gitCmd(
 		"-C", storeDir,
 		"-c", "user.email=aimd@localhost",
 		"-c", "user.name=aimd",
@@ -129,13 +139,13 @@ func CommitMsg(storeDir, projectKey, msg string) error {
 	// the index. Guard against this: if the directory is absent there is nothing
 	// to stage and the subsequent commit will return "nothing to commit".
 	if _, statErr := os.Stat(filepath.Join(storeDir, reposRel)); statErr == nil {
-		addOut, err := exec.Command("git", "-C", storeDir, "add", "-u", "--", reposRel).CombinedOutput()
+		addOut, err := gitCmd("-C", storeDir, "add", "-u", "--", reposRel).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("git add -u: %w — %s", err, strings.TrimSpace(string(addOut)))
 		}
 	}
 
-	commitOut, err := exec.Command("git",
+	commitOut, err := gitCmd(
 		"-C", storeDir,
 		"-c", "user.email=aimd@localhost",
 		"-c", "user.name=aimd",
@@ -159,7 +169,7 @@ func Push(storeDir string) error {
 	_, markerExists := os.Stat(markerPath)
 	_ = markerExists // we proceed with the push regardless
 
-	out, err := exec.Command("git", "-C", storeDir, "push", "origin", "HEAD:main").CombinedOutput()
+	out, err := gitCmd("-C", storeDir, "push", "origin", "HEAD:main").CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 
 	if err != nil {
