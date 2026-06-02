@@ -327,27 +327,6 @@ func TestPushErrorInterface(t *testing.T) {
 	}
 }
 
-func TestCommitMsg(t *testing.T) {
-	const projectKey = "msgkey"
-	storeDir, _ := setupStoreRepo(t, projectKey)
-
-	// Write a change to the repos dir so CommitMsg has something to stage.
-	reposDir := filepath.Join(storeDir, "repos", projectKey)
-	if err := os.WriteFile(filepath.Join(reposDir, "file.txt"), []byte("updated"), 0o600); err != nil {
-		t.Fatalf("write repos file: %v", err)
-	}
-
-	customMsg := "custom: my message\n\nsome body"
-	if err := store.CommitMsg(storeDir, projectKey, customMsg); err != nil {
-		t.Fatalf("store.CommitMsg: %v", err)
-	}
-
-	logOut := strings.TrimSpace(gitRun(t, storeDir, "log", "--format=%s", "-1"))
-	if logOut != "custom: my message" {
-		t.Errorf("commit subject = %q; want %q", logOut, "custom: my message")
-	}
-}
-
 func TestCommitWithUnknownVerb(t *testing.T) {
 	const projectKey = "unknownkey"
 	storeDir, registryFile := setupStoreRepo(t, projectKey)

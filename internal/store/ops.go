@@ -128,36 +128,6 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 	return nil
 }
 
-// CommitMsg stages repos/<projectKey>/ (modified files only, via -u) and
-// commits with a caller-supplied message. Use this when the commit message
-// must embed content that Commit's fixed format cannot express (e.g. the
-// tracked file list in "sync: app/CLAUDE.md [machine ts]").
-func CommitMsg(storeDir, projectKey, msg string) error {
-	reposRel := filepath.Join("repos", projectKey)
-
-	// git add -u with a pathspec fails when the path doesn't exist at all in
-	// the index. Guard against this: if the directory is absent there is nothing
-	// to stage and the subsequent commit will return "nothing to commit".
-	if _, statErr := os.Stat(filepath.Join(storeDir, reposRel)); statErr == nil {
-		addOut, err := gitCmd("-C", storeDir, "add", "-u", "--", reposRel).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("git add -u: %w — %s", err, strings.TrimSpace(string(addOut)))
-		}
-	}
-
-	commitOut, err := gitCmd(
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"commit", "-m", msg,
-	).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(commitOut)))
-	}
-
-	return nil
-}
-
 // Push pushes HEAD to origin/main.
 // On failure it writes a pending-push marker and returns *PushError so callers
 // can distinguish transient network failures from hard rejections.
