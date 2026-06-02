@@ -298,6 +298,60 @@ func TestSyncCmdAll_AheadWithUnstagedChanges(t *testing.T) {
 	}
 }
 
+// an AHEAD sync that commits overlay changes must also commit the
+// registry and metadata, leaving the store worktree clean — not a dirty
+// registry.json that a later DIVERGED rebase could choke on.
+func TestSyncCmdAll_AheadCommitsRegistryAndLeavesCleanTree(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Commit + push an initial overlay so origin is aware of repos/<key>.
+	reposDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(reposDir, 0o755); err != nil {
+		t.Fatalf("mkdir repos: %v", err)
+	}
+	overlayFile := filepath.Join(reposDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Become AHEAD with an uncommitted overlay edit.
+	syncAddCommitFile(t, cloneDir, "marker.txt", "ahead")
+	if err := os.WriteFile(overlayFile, []byte("# updated\n"), 0o644); err != nil {
+		t.Fatalf("update overlay: %v", err)
+	}
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	var out bytes.Buffer
+	if err := cmd.RunSync(cloneDir, "test-machine", true, false, &out); err != nil {
+		t.Fatalf("RunSync: %v", err)
+	}
+
+	// The store worktree must be clean — no leftover uncommitted registry.json.
+	status := strings.TrimSpace(syncGitRun(t, cloneDir, "status", "--porcelain"))
+	if status != "" {
+		t.Errorf("store worktree should be clean after sync, got:\n%s", status)
+	}
+
+	// The latest commit must include the registry and metadata, not just overlays.
+	files := syncGitRun(t, cloneDir, "show", "--name-only", "--format=", "HEAD")
+	for _, want := range []string{
+		filepath.Join(".aimd", "registry.json"),
+		filepath.Join("metadata", "test-proj.json"),
+	} {
+		if !strings.Contains(files, want) {
+			t.Errorf("sync commit should include %s; commit touched:\n%s", want, files)
+		}
+	}
+
+	_ = bareDir
+}
+
 func TestSyncCmdAll_Diverged(t *testing.T) {
 	bareDir, cloneDir := setupSyncBareWithClone(t)
 

@@ -40,8 +40,11 @@ Multiple paths may be given. Directories are walked recursively.`,
 // dryRun prints what would happen without making changes.
 // out receives all user-facing output.
 func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out io.Writer) error {
-	// Step 1: Determine link mode from config (fall back to symlink).
-	linkMode := loadLinkMode()
+	// Step 1: Determine link mode from config (fail fast on an unsupported mode).
+	linkMode, err := loadLinkMode()
+	if err != nil {
+		return fmt.Errorf("link mode: %w", err)
+	}
 
 	// Step 2: Detect project (git root, key, remote URL).
 	proj, err := project.Detect()
@@ -73,12 +76,15 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 		return err
 	}
 
-	// Step 5: Track each file; collect relative paths for the commit body.
+	// Step 5: Track each file. Stop at the first failure but remember which files
+	// already succeeded so they can still be persisted.
 	var tracked int
 	var trackedRelPaths []string
+	var trackErr error
 	for _, filePath := range filePaths {
 		if err := trackFile(filePath, proj.Root, proj.Key, storeDir, machineName, linkMode, projEntry, dryRun, out); err != nil {
-			return err
+			trackErr = err
+			break
 		}
 		tracked++
 		if relPath, relErr := filepath.Rel(proj.Root, filePath); relErr == nil {
@@ -87,36 +93,22 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 	}
 
 	if dryRun {
+		if trackErr != nil {
+			return trackErr
+		}
 		_, _ = fmt.Fprintf(out, "dry-run: %d file(s) would be tracked\n", tracked)
 		return nil
 	}
 
-	// Step 6: Update registry entry with machine info.
-	registry.UpsertMachine(projEntry, machineName, &registry.Machine{
-		LocalPath: proj.Root,
-		LastSeen:  time.Now().UTC(),
-	})
-	registry.UpsertProject(reg, proj.Key, projEntry)
-
-	// Step 7: Save registry.
-	if err := registry.Save(registryPath, reg); err != nil {
-		return fmt.Errorf("saving registry: %w", err)
+	// Step 6: Persist whatever succeeded — even when a later target failed — so the
+	// registry and store always reflect the actual on-disk state.
+	if len(trackedRelPaths) > 0 {
+		if perr := persistChange(storeDir, proj.Key, proj.Root, "track", machineName, reg, projEntry, registryPath, trackedRelPaths, out); perr != nil {
+			return errors.Join(trackErr, perr)
+		}
 	}
 
-	// Step 8: Write metadata/<project-key>.json.
-	if err := writeProjectMetadata(storeDir, proj.Key, projEntry); err != nil {
-		return fmt.Errorf("writing project metadata: %w", err)
-	}
-
-	// Step 9: git add + commit + push.
-	if err := store.Commit(storeDir, proj.Key, proj.Root, "track", machineName, trackedRelPaths); err != nil {
-		return fmt.Errorf("committing to store: %w", err)
-	}
-	if pushErr := store.Push(storeDir); pushErr != nil {
-		warnOnPushError(pushErr, storeDir, out)
-	}
-
-	return nil
+	return trackErr
 }
 
 // trackFile performs the copy-first safety sequence for a single file.
@@ -189,8 +181,12 @@ func trackFile(
 
 	// 5e: Create symlink at filePath → overlayPath.
 	if err := link.CreateLink(overlayPath, filePath, linkMode); err != nil {
-		// Attempt to restore the original from the overlay copy.
-		_ = os.WriteFile(filePath, srcData, fi.Mode().Perm())
+		// Attempt to restore the original from the overlay copy. If that restore
+		// also fails the original is gone from the project (it survives only as the
+		// uncommitted overlay), so surface both errors rather than swallowing it.
+		if restoreErr := os.WriteFile(filePath, srcData, fi.Mode().Perm()); restoreErr != nil {
+			return fmt.Errorf("creating link for %s failed (%w) and restoring the original failed: %w — content remains in overlay %s", relPath, err, restoreErr, overlayPath)
+		}
 		return fmt.Errorf("creating link for %s: %w", relPath, err)
 	}
 
@@ -260,14 +256,41 @@ func warnOnPushError(err error, storeDir string, out io.Writer) {
 	}
 }
 
-// loadLinkMode reads the configured link mode, defaulting to symlink when config is absent.
-func loadLinkMode() link.LinkMode {
+// loadLinkMode reads the configured link mode (defaulting to symlink) and
+// validates it, so callers fail fast on an unsupported mode before any
+// destructive file operation rather than after the user's file is removed.
+func loadLinkMode() (link.LinkMode, error) {
+	mode := link.LinkModeSymlink
 	if cfgPath, err := config.DefaultPath(); err == nil {
 		if cfg, err := config.Load(cfgPath); err == nil && cfg.LinkMode != "" {
-			return link.LinkMode(cfg.LinkMode)
+			mode = link.LinkMode(cfg.LinkMode)
 		}
 	}
-	return link.LinkModeSymlink
+	return validateLinkMode(mode)
+}
+
+// validateLinkMode returns mode unchanged when it is supported, or an error
+// describing why it cannot be used. Only symlink is implemented in v1.
+func validateLinkMode(mode link.LinkMode) (link.LinkMode, error) {
+	switch mode {
+	case link.LinkModeSymlink:
+		return mode, nil
+	case link.LinkModeHardlink, link.LinkModeCopy:
+		return "", fmt.Errorf("link mode %q is not implemented in v1 (only %q is supported)", mode, link.LinkModeSymlink)
+	default:
+		return "", fmt.Errorf("unknown link mode %q in config (expected %q)", mode, link.LinkModeSymlink)
+	}
+}
+
+// isVCSDir reports whether name is a version-control metadata directory that must
+// never be walked into when expanding a directory target.
+func isVCSDir(name string) bool {
+	switch name {
+	case ".git", ".hg", ".svn", ".bzr":
+		return true
+	default:
+		return false
+	}
 }
 
 // expandTargets resolves each target (file or directory path) to a list of absolute file paths.
@@ -298,9 +321,16 @@ func expandTargets(targets []string) ([]string, error) {
 			if walkErr != nil {
 				return walkErr
 			}
-			if !d.IsDir() {
-				filePaths = append(filePaths, path)
+			if d.IsDir() {
+				// Never descend into a VCS metadata directory: tracking `.` from a
+				// repo root must not relocate the repo's own git internals into the
+				// store and replace them with symlinks.
+				if isVCSDir(d.Name()) {
+					return filepath.SkipDir
+				}
+				return nil
 			}
+			filePaths = append(filePaths, path)
 			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("walking directory %s: %w", target, err)

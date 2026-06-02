@@ -236,6 +236,73 @@ func TestRunTrack_AlreadySymlink(t *testing.T) {
 	}
 }
 
+// when tracking multiple files and a later one fails, the files that
+// already succeeded must still be persisted (registry + committed), not left as
+// symlinks that are invisible to the registry/store.
+func TestRunTrack_PartialFailurePersistsSucceeded(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+
+	for _, d := range []string{projectDir, storeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeProjectRepo(t, projectDir)
+	makeStoreRepo(t, storeDir)
+
+	// good.md is a real file; bad.md is a pre-existing symlink (fails validation).
+	if err := os.WriteFile(filepath.Join(projectDir, "good.md"), []byte("good\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "elsewhere.md"), filepath.Join(projectDir, "bad.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	// Expect an error because bad.md fails — but good.md must be fully tracked.
+	if err := cmd.RunTrack([]string{"good.md", "bad.md"}, storeDir, "test-machine", false, io.Discard); err == nil {
+		t.Fatal("expected an error from the failing second file, got nil")
+	}
+
+	// good.md must now be a symlink.
+	fi, err := os.Lstat(filepath.Join(projectDir, "good.md"))
+	if err != nil {
+		t.Fatalf("Lstat good.md: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("good.md should have been converted to a symlink")
+	}
+
+	// Registry must list good.md (persisted despite the later failure).
+	regData, err := os.ReadFile(filepath.Join(storeDir, ".aimd", "registry.json"))
+	if err != nil {
+		t.Fatalf("reading registry: %v", err)
+	}
+	if !strings.Contains(string(regData), "good.md") {
+		t.Errorf("registry should contain good.md after partial failure:\n%s", regData)
+	}
+
+	// Store must have a track commit (good.md committed, not left uncommitted).
+	logOut, logErr := exec.Command("git", "-C", storeDir, "log", "--format=%s", "-1").CombinedOutput()
+	if logErr != nil {
+		t.Fatalf("git log: %v\n%s", logErr, logOut)
+	}
+	if !strings.Contains(string(logOut), "track:") {
+		t.Errorf("expected a track commit in store, got: %s", logOut)
+	}
+}
+
 func TestRunTrack_NotExists(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	base := t.TempDir()

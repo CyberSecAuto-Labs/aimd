@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
-	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
 var restoreForce bool
@@ -52,8 +50,12 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", strings.TrimSpace(string(pullOut)))
 	}
 
-	// Step 2: Determine link mode from config (fall back to symlink).
-	linkMode := loadLinkMode()
+	// Step 2: Determine link mode from config (fail fast on an unsupported mode,
+	// before any destructive file replacement under --force).
+	linkMode, err := loadLinkMode()
+	if err != nil {
+		return fmt.Errorf("link mode: %w", err)
+	}
 
 	// Step 3: Detect project.
 	proj, err := project.Detect()
@@ -102,33 +104,13 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		}
 	}
 
-	// Step 7: Registry machine upsert + save + writeProjectMetadata.
-	registry.UpsertMachine(projEntry, machineName, &registry.Machine{
-		LocalPath: proj.Root,
-		LastSeen:  time.Now().UTC(),
-	})
-	registry.UpsertProject(reg, proj.Key, projEntry)
-
-	if err := registry.Save(registryPath, reg); err != nil {
-		return fmt.Errorf("saving registry: %w", err)
-	}
-
-	if err := writeProjectMetadata(storeDir, proj.Key, projEntry); err != nil {
-		return fmt.Errorf("writing project metadata: %w", err)
-	}
-
-	// Step 8: Commit store (only restored files).
+	// Step 7: Persist via the shared ritual — but only when something was actually
+	// restored, so an idempotent re-run neither writes the registry nor creates an
+	// empty commit.
 	if len(restoredPaths) > 0 {
-		if commitErr := store.Commit(storeDir, proj.Key, proj.Root, "restore", machineName, restoredPaths); commitErr != nil {
-			if !isNothingToCommit(commitErr) {
-				return fmt.Errorf("committing to store: %w", commitErr)
-			}
+		if perr := persistChange(storeDir, proj.Key, proj.Root, "restore", machineName, reg, projEntry, registryPath, restoredPaths, out); perr != nil {
+			return perr
 		}
-	}
-
-	// Step 9: Push (warn on failure, don't fail the command).
-	if pushErr := store.Push(storeDir); pushErr != nil {
-		warnOnPushError(pushErr, storeDir, out)
 	}
 
 	_, _ = fmt.Fprintf(out, "✓ Restored %d file(s) in %s\n", len(restoredPaths), filepath.Base(proj.Root))
@@ -199,10 +181,21 @@ func restoreFile(overlaySrc, projectDst, tfPath string, linkMode link.LinkMode, 
 		return false, nil
 	}
 
+	// Copy-first: read the user's real file into memory so it can be restored if
+	// linking fails. Unlike a naive remove-then-link, this never leaves the user
+	// with no file when CreateLink errors.
+	backup, readErr := os.ReadFile(projectDst)
+	if readErr != nil {
+		return false, fmt.Errorf("reading real file %s before replacing: %w", tfPath, readErr)
+	}
 	if err := os.Remove(projectDst); err != nil {
 		return false, fmt.Errorf("removing real file %s: %w", tfPath, err)
 	}
 	if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
+		// Roll back: put the user's real file back from the in-memory backup.
+		if restoreErr := os.WriteFile(projectDst, backup, fi.Mode().Perm()); restoreErr != nil {
+			return false, fmt.Errorf("creating link for %s failed (%w) and restoring the real file failed: %w", tfPath, err, restoreErr)
+		}
 		return false, fmt.Errorf("creating link for %s: %w", tfPath, err)
 	}
 	return true, nil
