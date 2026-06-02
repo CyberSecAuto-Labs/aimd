@@ -69,6 +69,76 @@ func TestDeriveKey_EmptyURL(t *testing.T) {
 	}
 }
 
+// keys must be stable across SSH port presence and must never be
+// destabilised by an '@' in the path.
+func TestDeriveKey_StableAcrossFormats(t *testing.T) {
+	cases := []struct {
+		name      string
+		remoteURL string
+		want      string
+	}{
+		{
+			name:      "ssh url with explicit port drops the port",
+			remoteURL: "ssh://git@host:22/org/repo.git",
+			want:      "host~org~repo",
+		},
+		{
+			name:      "scp form for the same repo (unchanged)",
+			remoteURL: "git@host:org/repo.git",
+			want:      "host~org~repo",
+		},
+		{
+			name:      "https unchanged",
+			remoteURL: "https://github.com/org/backend.git",
+			want:      "github.com~org~backend",
+		},
+		{
+			name:      "ssh url without port",
+			remoteURL: "ssh://git@host/org/repo.git",
+			want:      "host~org~repo",
+		},
+		{
+			name:      "at-sign in the path does not truncate the host",
+			remoteURL: "https://github.com/org/re@po.git",
+			want:      "github.com~org~re@po",
+		},
+		{
+			name:      "scp form with at-sign in the path",
+			remoteURL: "git@host:org/re@po.git",
+			want:      "host~org~re@po",
+		},
+		{
+			name:      "ssh url with non-numeric segment after colon keeps scp-style conversion",
+			remoteURL: "ssh://git@host:org/repo.git",
+			want:      "host~org~repo",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := project.DeriveKey(tc.remoteURL)
+			if err != nil {
+				t.Fatalf("DeriveKey(%q): unexpected error: %v", tc.remoteURL, err)
+			}
+			if got != tc.want {
+				t.Errorf("DeriveKey(%q) = %q, want %q", tc.remoteURL, got, tc.want)
+			}
+		})
+	}
+}
+
+// the two canonical forms for one repo must collapse to one key.
+func TestDeriveKey_PortAndScpFormsMatch(t *testing.T) {
+	a, errA := project.DeriveKey("ssh://git@host:22/org/repo.git")
+	b, errB := project.DeriveKey("git@host:org/repo.git")
+	if errA != nil || errB != nil {
+		t.Fatalf("unexpected errors: %v, %v", errA, errB)
+	}
+	if a != b {
+		t.Errorf("expected identical keys for the same repo, got %q and %q", a, b)
+	}
+}
+
 func TestDeriveKeyFromPath_Format(t *testing.T) {
 	key := project.DeriveKeyFromPath("/home/user/projects/myrepo")
 	if !strings.HasPrefix(key, "local~") {
