@@ -125,6 +125,11 @@ func trackFile(
 		return fmt.Errorf("computing relative path for %s: %w", filePath, err)
 	}
 
+	// Reject a target that escapes the project root before any file op.
+	if pathEscapesRoot(relPath) {
+		return fmt.Errorf("%s is outside the project root — skipping", filePath)
+	}
+
 	// Validation: file must exist and not already be a symlink.
 	fi, err := os.Lstat(filePath)
 	if err != nil {

@@ -303,6 +303,69 @@ func TestRunTrack_PartialFailurePersistsSucceeded(t *testing.T) {
 	}
 }
 
+// track must reject a target whose path escapes the project root (e.g.
+// "../notes.md") before any filesystem mutation — never copying the out-of-tree
+// file into the store, deleting the original, or replacing it with a symlink.
+func TestRunTrack_RejectsTargetOutsideProjectRoot(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+
+	for _, d := range []string{projectDir, storeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeProjectRepo(t, projectDir)
+	makeStoreRepo(t, storeDir)
+
+	// An out-of-tree file the escaping target points at.
+	outsideFile := filepath.Join(base, "notes.md")
+	content := "secret notes\n"
+	if err := os.WriteFile(outsideFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	// "../notes.md" resolves to base/notes.md — outside the project root.
+	err = cmd.RunTrack([]string{filepath.Join("..", "notes.md")}, storeDir, "test-machine", false, io.Discard)
+	if err == nil {
+		t.Fatal("expected error tracking a target outside the project root, got nil")
+	}
+
+	// The out-of-tree file must be untouched: still a regular file with its content.
+	fi, statErr := os.Lstat(outsideFile)
+	if statErr != nil {
+		t.Fatalf("outside file was disturbed: %v", statErr)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("outside file must not have been replaced with a symlink")
+	}
+	got, readErr := os.ReadFile(outsideFile)
+	if readErr != nil {
+		t.Fatalf("reading outside file: %v", readErr)
+	}
+	if string(got) != content {
+		t.Errorf("outside file content changed: got %q want %q", got, content)
+	}
+
+	// No overlay must have escaped the project's repos dir: the join of the
+	// escaping relPath would land at repos/notes.md (climbing over <key>).
+	strayOverlay := filepath.Join(storeDir, "repos", "notes.md")
+	if _, err := os.Stat(strayOverlay); !os.IsNotExist(err) {
+		t.Errorf("an overlay escaped the project's repos dir (stat %s: %v)", strayOverlay, err)
+	}
+}
+
 func TestRunTrack_NotExists(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	base := t.TempDir()

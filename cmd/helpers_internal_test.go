@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,29 @@ func TestIsNothingToCommit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isNothingToCommit(tc.err); got != tc.want {
 				t.Errorf("isNothingToCommit(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPathEscapesRoot(t *testing.T) {
+	sep := string(os.PathSeparator)
+	cases := []struct {
+		name    string
+		relPath string
+		want    bool
+	}{
+		{"plain file", "CLAUDE.md", false},
+		{"nested file", "docs" + sep + "notes.md", false},
+		{"dot-prefixed but inside", "..foo", false},
+		{"bare dotdot", "..", true},
+		{"escaping parent", ".." + sep + "notes.md", true},
+		{"escaping deeper", ".." + sep + ".." + sep + "etc" + sep + "x", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pathEscapesRoot(tc.relPath); got != tc.want {
+				t.Errorf("pathEscapesRoot(%q) = %v, want %v", tc.relPath, got, tc.want)
 			}
 		})
 	}
