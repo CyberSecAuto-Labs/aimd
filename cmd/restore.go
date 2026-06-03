@@ -84,6 +84,11 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 	// Step 5: Restore each tracked file.
 	var restoredPaths []string
 	for _, tf := range projEntry.Tracked {
+		// Reject a registry path that escapes the project root before any file op.
+		if pathEscapesRoot(tf.Path) {
+			return fmt.Errorf("%s is outside the project root — skipping", tf.Path)
+		}
+
 		overlaySrc := filepath.Join(storeDir, "repos", proj.Key, tf.Path)
 		projectDst := filepath.Join(proj.Root, tf.Path)
 

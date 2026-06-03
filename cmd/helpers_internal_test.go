@@ -41,6 +41,7 @@ func TestPathEscapesRoot(t *testing.T) {
 		{"bare dotdot", "..", true},
 		{"escaping parent", ".." + sep + "notes.md", true},
 		{"escaping deeper", ".." + sep + ".." + sep + "etc" + sep + "x", true},
+		{"embedded dotdot escapes", "foo" + sep + ".." + sep + ".." + sep + "etc", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
