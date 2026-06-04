@@ -167,6 +167,30 @@ func TestSyncBehind(t *testing.T) {
 	}
 }
 
+func TestPullFastForwards(t *testing.T) {
+	bareDir, cloneDir := setupBareWithClone(t)
+
+	// Push a commit from another clone so cloneDir is behind.
+	pusherDir := t.TempDir()
+	cloneOut, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, cloneOut)
+	}
+	gitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	gitRun(t, pusherDir, "config", "user.name", "test")
+	addCommitFile(t, pusherDir, "remote.txt", "from remote")
+	gitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	if _, err := store.Pull(cloneDir); err != nil {
+		t.Fatalf("store.Pull: %v", err)
+	}
+
+	// The pulled file should now be present in the worktree.
+	if _, statErr := os.Stat(filepath.Join(cloneDir, "remote.txt")); statErr != nil {
+		t.Errorf("remote.txt not present after Pull: %v", statErr)
+	}
+}
+
 func TestSyncDiverged(t *testing.T) {
 	bareDir, cloneDir := setupBareWithClone(t)
 

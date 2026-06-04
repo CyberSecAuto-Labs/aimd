@@ -134,6 +134,18 @@ func Sync(storeDir string) (SyncState, error) {
 	}
 }
 
+// Pull fast-forwards the store from origin/main and returns git's combined
+// output. It is best-effort: callers decide how to handle a non-nil error
+// (restore warns and continues from local state). Output is forced to English
+// (LC_ALL=C) via gitCmd so any caller inspection is locale-stable.
+func Pull(storeDir string) (string, error) {
+	out, err := gitCmd("-C", storeDir, "pull", "--ff-only", "origin", "main").CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), fmt.Errorf("git pull --ff-only: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // revParse returns the full SHA for the given ref.
 func revParse(storeDir, ref string) (string, error) {
 	out, err := gitCmd("-C", storeDir, "rev-parse", ref).CombinedOutput()

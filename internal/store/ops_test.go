@@ -304,6 +304,52 @@ func TestPushMarkerClearedOnSuccess(t *testing.T) {
 	}
 }
 
+func TestOverlayDirtyCleanWorktree(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if dirty {
+		t.Error("OverlayDirty = true on a committed overlay, want false")
+	}
+}
+
+func TestOverlayDirtyUncommittedChange(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	// Modify a file under repos/<key> without committing it.
+	overlayFile := filepath.Join(storeDir, "repos", projectKey, "file.txt")
+	if err := os.WriteFile(overlayFile, []byte("changed"), 0o600); err != nil {
+		t.Fatalf("write overlay file: %v", err)
+	}
+
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if !dirty {
+		t.Error("OverlayDirty = false on an uncommitted overlay change, want true")
+	}
+}
+
+func TestOverlayDirtyMissingOverlay(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	// A project key with no overlay directory yields an empty status.
+	dirty, err := store.OverlayDirty(storeDir, "nonexistent")
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if dirty {
+		t.Error("OverlayDirty = true for a missing overlay, want false")
+	}
+}
+
 func TestPushErrorInterface(t *testing.T) {
 	inner := fmt.Errorf("exit status 1")
 	pe := &store.PushError{
