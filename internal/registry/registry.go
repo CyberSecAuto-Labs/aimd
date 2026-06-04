@@ -90,7 +90,11 @@ func Save(path string, r *Registry) error {
 }
 
 // UpsertProject sets or replaces the project at key in the registry.
+// It initialises r.Projects if nil.
 func UpsertProject(r *Registry, key string, proj *Project) {
+	if r.Projects == nil {
+		r.Projects = make(map[string]*Project)
+	}
 	r.Projects[key] = proj
 }
 

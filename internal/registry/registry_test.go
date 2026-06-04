@@ -316,6 +316,34 @@ func TestUpsertProject_ReplacesExistingKey(t *testing.T) {
 	}
 }
 
+func TestUpsertProject_InitialisesNilMap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.json")
+
+	// A registry whose JSON omits "projects" leaves the map nil after Load.
+	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	r, err := registry.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if r.Projects != nil {
+		t.Fatal("expected nil Projects map after loading registry without projects")
+	}
+
+	registry.UpsertProject(r, "key", newProject("app", "url"))
+
+	got, ok := r.Projects["key"]
+	if !ok {
+		t.Fatal("project not found after UpsertProject on nil map")
+	}
+	if got.DisplayName != "app" {
+		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "app")
+	}
+}
+
 func TestGetProject_ExistingKey(t *testing.T) {
 	t.Parallel()
 	r := registry.New()
