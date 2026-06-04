@@ -208,6 +208,67 @@ func TestRemoveEntry_MultipleOccurrences(t *testing.T) {
 	}
 }
 
+// RemoveEntry must write atomically (temp file + rename) and leave
+// no leftover .tmp file behind.
+func TestRemoveEntry_NoLeftoverTempFile(t *testing.T) {
+	path := excludePath(t)
+	if err := exclude.AppendEntry(path, "first.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+	if err := exclude.AppendEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+
+	if err := exclude.RemoveEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+
+	// Content must be correct.
+	ok, err := exclude.HasEntry(path, "CLAUDE.md")
+	if err != nil || ok {
+		t.Errorf("expected CLAUDE.md removed; ok=%v err=%v", ok, err)
+	}
+	ok, err = exclude.HasEntry(path, "first.md")
+	if err != nil || !ok {
+		t.Errorf("expected first.md preserved; ok=%v err=%v", ok, err)
+	}
+
+	// No leftover .tmp file in the directory.
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("leftover temp file present: %s", e.Name())
+		}
+	}
+}
+
+// file mode must be preserved as 0o644 after an atomic rewrite.
+func TestRemoveEntry_PreservesMode(t *testing.T) {
+	path := excludePath(t)
+	if err := exclude.AppendEntry(path, "a.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+	if err := exclude.AppendEntry(path, "b.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+
+	if err := exclude.RemoveEntry(path, "a.md"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("file mode = %o, want 644", perm)
+	}
+}
+
 // --- Multi-entry integration test ---
 
 func TestMultiEntry_AppendHasRemove(t *testing.T) {

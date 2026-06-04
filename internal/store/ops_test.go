@@ -304,6 +304,52 @@ func TestPushMarkerClearedOnSuccess(t *testing.T) {
 	}
 }
 
+func TestOverlayDirtyCleanWorktree(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if dirty {
+		t.Error("OverlayDirty = true on a committed overlay, want false")
+	}
+}
+
+func TestOverlayDirtyUncommittedChange(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	// Modify a file under repos/<key> without committing it.
+	overlayFile := filepath.Join(storeDir, "repos", projectKey, "file.txt")
+	if err := os.WriteFile(overlayFile, []byte("changed"), 0o600); err != nil {
+		t.Fatalf("write overlay file: %v", err)
+	}
+
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if !dirty {
+		t.Error("OverlayDirty = false on an uncommitted overlay change, want true")
+	}
+}
+
+func TestOverlayDirtyMissingOverlay(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	// A project key with no overlay directory yields an empty status.
+	dirty, err := store.OverlayDirty(storeDir, "nonexistent")
+	if err != nil {
+		t.Fatalf("store.OverlayDirty: %v", err)
+	}
+	if dirty {
+		t.Error("OverlayDirty = true for a missing overlay, want false")
+	}
+}
+
 func TestPushErrorInterface(t *testing.T) {
 	inner := fmt.Errorf("exit status 1")
 	pe := &store.PushError{
@@ -324,27 +370,6 @@ func TestPushErrorInterface(t *testing.T) {
 	// Unwrap() should let errors.Is work with the inner error.
 	if !errors.Is(pe, inner) {
 		t.Errorf("errors.Is(pe, inner) returned false; Unwrap may not be working")
-	}
-}
-
-func TestCommitMsg(t *testing.T) {
-	const projectKey = "msgkey"
-	storeDir, _ := setupStoreRepo(t, projectKey)
-
-	// Write a change to the repos dir so CommitMsg has something to stage.
-	reposDir := filepath.Join(storeDir, "repos", projectKey)
-	if err := os.WriteFile(filepath.Join(reposDir, "file.txt"), []byte("updated"), 0o600); err != nil {
-		t.Fatalf("write repos file: %v", err)
-	}
-
-	customMsg := "custom: my message\n\nsome body"
-	if err := store.CommitMsg(storeDir, projectKey, customMsg); err != nil {
-		t.Fatalf("store.CommitMsg: %v", err)
-	}
-
-	logOut := strings.TrimSpace(gitRun(t, storeDir, "log", "--format=%s", "-1"))
-	if logOut != "custom: my message" {
-		t.Errorf("commit subject = %q; want %q", logOut, "custom: my message")
 	}
 }
 

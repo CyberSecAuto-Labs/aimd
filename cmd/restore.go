@@ -1,18 +1,13 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/CyberSecAuto-Labs/aimd/internal/config"
 	"github.com/CyberSecAuto-Labs/aimd/internal/exclude"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
@@ -44,25 +39,21 @@ file. Use --force to replace real files with store overlays.`,
 // out receives all user-facing output.
 func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer) error {
 	// Pre-check: store must exist and be a git repo before anything else.
-	if _, statErr := os.Stat(storeDir); os.IsNotExist(statErr) {
-		return fmt.Errorf("store not found at %s — run `aimd init` first", storeDir)
-	}
-	if _, statErr := os.Stat(filepath.Join(storeDir, ".git")); os.IsNotExist(statErr) {
-		return fmt.Errorf("store at %s is not a git repository — run `aimd init` first", storeDir)
+	if err := verifyStore(storeDir); err != nil {
+		return err
 	}
 
 	// Step 1: Pull the store (warn on failure, continue).
-	pullOut, pullErr := exec.Command("git", "-C", storeDir, "pull", "--ff-only", "origin", "main").CombinedOutput()
+	pullOut, pullErr := store.Pull(storeDir)
 	if pullErr != nil {
-		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", strings.TrimSpace(string(pullOut)))
+		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", pullOut)
 	}
 
-	// Step 2: Determine link mode from config (fall back to symlink).
-	linkMode := link.LinkModeSymlink
-	if cfgPath, err := config.DefaultPath(); err == nil {
-		if cfg, err := config.Load(cfgPath); err == nil && cfg.LinkMode != "" {
-			linkMode = link.LinkMode(cfg.LinkMode)
-		}
+	// Step 2: Determine link mode from config (fail fast on an unsupported mode,
+	// before any destructive file replacement under --force).
+	linkMode, err := loadLinkMode()
+	if err != nil {
+		return fmt.Errorf("link mode: %w", err)
 	}
 
 	// Step 3: Detect project.
@@ -92,70 +83,21 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 	// Step 5: Restore each tracked file.
 	var restoredPaths []string
 	for _, tf := range projEntry.Tracked {
+		// Reject a registry path that escapes the project root before any file op.
+		if pathEscapesRoot(tf.Path) {
+			return fmt.Errorf("%s is outside the project root — skipping", tf.Path)
+		}
+
 		overlaySrc := filepath.Join(storeDir, "repos", proj.Key, tf.Path)
 		projectDst := filepath.Join(proj.Root, tf.Path)
 
-		// State 1: overlay missing → warn and skip.
-		if _, statErr := os.Stat(overlaySrc); os.IsNotExist(statErr) {
-			_, _ = fmt.Fprintf(out, "warning: %s not in store, skipping\n", tf.Path)
-			continue
+		restored, err := restoreFile(overlaySrc, projectDst, tf.Path, linkMode, force, out)
+		if err != nil {
+			return err
 		}
-
-		fi, lstatErr := os.Lstat(projectDst)
-
-		if os.IsNotExist(lstatErr) {
-			// State 5: destination missing → create symlink.
-			if err := os.MkdirAll(filepath.Dir(projectDst), 0o755); err != nil {
-				return fmt.Errorf("creating parent directory for %s: %w", tf.Path, err)
-			}
-			if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
-				return fmt.Errorf("creating link for %s: %w", tf.Path, err)
-			}
+		if restored {
 			restoredPaths = append(restoredPaths, tf.Path)
-			continue
 		}
-
-		if lstatErr != nil {
-			return fmt.Errorf("stat %s: %w", tf.Path, lstatErr)
-		}
-
-		if fi.Mode()&os.ModeSymlink != 0 {
-			// It's a symlink — check if it's already correct.
-			ok, verifyErr := link.VerifyLink(projectDst, overlaySrc, linkMode)
-			if verifyErr == nil && ok {
-				// State 2: correct symlink → skip (idempotent).
-				continue
-			}
-			// State 3: broken or wrong symlink → remove and recreate.
-			if err := os.Remove(projectDst); err != nil {
-				return fmt.Errorf("removing broken symlink %s: %w", tf.Path, err)
-			}
-			if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
-				return fmt.Errorf("creating link for %s: %w", tf.Path, err)
-			}
-			restoredPaths = append(restoredPaths, tf.Path)
-			continue
-		}
-
-		// State 4a: directory at destination → always skip, even with --force.
-		if fi.IsDir() {
-			_, _ = fmt.Fprintf(out, "warning: %s is a directory; remove it manually to restore the symlink\n", tf.Path)
-			continue
-		}
-
-		// State 4b: real file → warn unless --force.
-		if !force {
-			_, _ = fmt.Fprintf(out, "warning: %s is a real file; use --force to replace with store overlay\n", tf.Path)
-			continue
-		}
-		// --force: remove real file and replace with symlink.
-		if err := os.Remove(projectDst); err != nil {
-			return fmt.Errorf("removing real file %s: %w", tf.Path, err)
-		}
-		if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
-			return fmt.Errorf("creating link for %s: %w", tf.Path, err)
-		}
-		restoredPaths = append(restoredPaths, tf.Path)
 	}
 
 	// Step 6: Update .git/info/exclude for all tracked files (idempotent).
@@ -166,37 +108,12 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		}
 	}
 
-	// Step 7: Registry machine upsert + save + writeProjectMetadata.
-	registry.UpsertMachine(projEntry, machineName, &registry.Machine{
-		LocalPath: proj.Root,
-		LastSeen:  time.Now().UTC(),
-	})
-	registry.UpsertProject(reg, proj.Key, projEntry)
-
-	if err := registry.Save(registryPath, reg); err != nil {
-		return fmt.Errorf("saving registry: %w", err)
-	}
-
-	if err := writeProjectMetadata(storeDir, proj.Key, projEntry); err != nil {
-		return fmt.Errorf("writing project metadata: %w", err)
-	}
-
-	// Step 8: Commit store (only restored files).
+	// Step 7: Persist via the shared ritual — but only when something was actually
+	// restored, so an idempotent re-run neither writes the registry nor creates an
+	// empty commit.
 	if len(restoredPaths) > 0 {
-		if commitErr := store.Commit(storeDir, proj.Key, proj.Root, "restore", machineName, restoredPaths); commitErr != nil {
-			if !isNothingToCommit(commitErr) {
-				return fmt.Errorf("committing to store: %w", commitErr)
-			}
-		}
-	}
-
-	// Step 9: Push (warn on failure, don't fail the command).
-	if pushErr := store.Push(storeDir); pushErr != nil {
-		var pe *store.PushError
-		if errors.As(pushErr, &pe) && !pe.Transient {
-			_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
-		} else {
-			_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
+		if perr := persistChange(storeDir, proj.Key, proj.Root, "restore", machineName, reg, projEntry, registryPath, restoredPaths, out); perr != nil {
+			return perr
 		}
 	}
 
@@ -207,4 +124,83 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 func init() {
 	restoreCmd.Flags().BoolVar(&restoreForce, "force", false, "Replace existing real files with store overlays")
 	rootCmd.AddCommand(restoreCmd)
+}
+
+// verifyStore returns an error if storeDir is absent or is not a git repository.
+func verifyStore(storeDir string) error {
+	if _, err := os.Stat(storeDir); os.IsNotExist(err) {
+		return fmt.Errorf("store not found at %s — run `aimd init` first", storeDir)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, ".git")); os.IsNotExist(err) {
+		return fmt.Errorf("store at %s is not a git repository — run `aimd init` first", storeDir)
+	}
+	return nil
+}
+
+// restoreFile handles all possible destination states for a single tracked file.
+// Returns true if a new symlink was created (i.e. something changed).
+func restoreFile(overlaySrc, projectDst, tfPath string, linkMode link.LinkMode, force bool, out io.Writer) (bool, error) {
+	if _, statErr := os.Stat(overlaySrc); os.IsNotExist(statErr) {
+		_, _ = fmt.Fprintf(out, "warning: %s not in store, skipping\n", tfPath)
+		return false, nil
+	}
+
+	fi, lstatErr := os.Lstat(projectDst)
+
+	if os.IsNotExist(lstatErr) {
+		if err := os.MkdirAll(filepath.Dir(projectDst), 0o755); err != nil {
+			return false, fmt.Errorf("creating parent directory for %s: %w", tfPath, err)
+		}
+		if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
+			return false, fmt.Errorf("creating link for %s: %w", tfPath, err)
+		}
+		return true, nil
+	}
+
+	if lstatErr != nil {
+		return false, fmt.Errorf("stat %s: %w", tfPath, lstatErr)
+	}
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		ok, verifyErr := link.VerifyLink(projectDst, overlaySrc, linkMode)
+		if verifyErr == nil && ok {
+			return false, nil
+		}
+		if err := os.Remove(projectDst); err != nil {
+			return false, fmt.Errorf("removing broken symlink %s: %w", tfPath, err)
+		}
+		if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
+			return false, fmt.Errorf("creating link for %s: %w", tfPath, err)
+		}
+		return true, nil
+	}
+
+	if fi.IsDir() {
+		_, _ = fmt.Fprintf(out, "warning: %s is a directory; remove it manually to restore the symlink\n", tfPath)
+		return false, nil
+	}
+
+	if !force {
+		_, _ = fmt.Fprintf(out, "warning: %s is a real file; use --force to replace with store overlay\n", tfPath)
+		return false, nil
+	}
+
+	// Copy-first: read the user's real file into memory so it can be restored if
+	// linking fails. Unlike a naive remove-then-link, this never leaves the user
+	// with no file when CreateLink errors.
+	backup, readErr := os.ReadFile(projectDst)
+	if readErr != nil {
+		return false, fmt.Errorf("reading real file %s before replacing: %w", tfPath, readErr)
+	}
+	if err := os.Remove(projectDst); err != nil {
+		return false, fmt.Errorf("removing real file %s: %w", tfPath, err)
+	}
+	if err := link.CreateLink(overlaySrc, projectDst, linkMode); err != nil {
+		// Roll back: put the user's real file back from the in-memory backup.
+		if restoreErr := os.WriteFile(projectDst, backup, fi.Mode().Perm()); restoreErr != nil {
+			return false, fmt.Errorf("creating link for %s failed (%w) and restoring the real file failed: %w", tfPath, err, restoreErr)
+		}
+		return false, fmt.Errorf("creating link for %s: %w", tfPath, err)
+	}
+	return true, nil
 }

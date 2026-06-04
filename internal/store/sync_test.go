@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
@@ -166,6 +167,30 @@ func TestSyncBehind(t *testing.T) {
 	}
 }
 
+func TestPullFastForwards(t *testing.T) {
+	bareDir, cloneDir := setupBareWithClone(t)
+
+	// Push a commit from another clone so cloneDir is behind.
+	pusherDir := t.TempDir()
+	cloneOut, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, cloneOut)
+	}
+	gitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	gitRun(t, pusherDir, "config", "user.name", "test")
+	addCommitFile(t, pusherDir, "remote.txt", "from remote")
+	gitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	if _, err := store.Pull(cloneDir); err != nil {
+		t.Fatalf("store.Pull: %v", err)
+	}
+
+	// The pulled file should now be present in the worktree.
+	if _, statErr := os.Stat(filepath.Join(cloneDir, "remote.txt")); statErr != nil {
+		t.Errorf("remote.txt not present after Pull: %v", statErr)
+	}
+}
+
 func TestSyncDiverged(t *testing.T) {
 	bareDir, cloneDir := setupBareWithClone(t)
 
@@ -196,6 +221,97 @@ func TestSyncDiverged(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(cloneDir, name)); statErr != nil {
 			t.Errorf("%s not present after clean rebase: %v", name, statErr)
 		}
+	}
+}
+
+// when `git pull --rebase` fails for a non-conflict reason (dirty
+// worktree), Sync must NOT return a *ConflictError. It must surface the real
+// git error and leave no rebase in progress.
+func TestSyncDivergedDirtyWorktreeReturnsRealError(t *testing.T) {
+	bareDir, cloneDir := setupBareWithClone(t)
+
+	// Advance origin/main from another clone.
+	pusherDir := t.TempDir()
+	cloneOut, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, cloneOut)
+	}
+	gitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	gitRun(t, pusherDir, "config", "user.name", "test")
+	addCommitFile(t, pusherDir, "remote.txt", "remote side")
+	gitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	// Add a local-only commit so the state is DIVERGED.
+	addCommitFile(t, cloneDir, "local.txt", "local side")
+
+	// Dirty the worktree with uncommitted changes so `git pull --rebase` refuses
+	// to start (no conflict — a pre-rebase failure).
+	if err := os.WriteFile(filepath.Join(cloneDir, "local.txt"), []byte("dirty uncommitted"), 0o600); err != nil {
+		t.Fatalf("dirty worktree: %v", err)
+	}
+
+	state, err := store.Sync(cloneDir)
+	if err == nil {
+		t.Fatal("Sync: expected error for dirty-worktree rebase failure, got nil")
+	}
+
+	// Must NOT be a ConflictError.
+	var conflictErr *store.ConflictError
+	if errors.As(err, &conflictErr) {
+		t.Errorf("expected a real git error, got *ConflictError: %v", err)
+	}
+	if state != store.StateConflict && state != store.StateDiverged {
+		// We tolerate either signalling state, but the key is the error type.
+		t.Logf("returned state %v", state)
+	}
+
+	// No rebase should be left in progress.
+	for _, d := range []string{"rebase-merge", "rebase-apply"} {
+		if _, statErr := os.Stat(filepath.Join(cloneDir, ".git", d)); statErr == nil {
+			t.Errorf("rebase left in progress: .git/%s exists", d)
+		}
+	}
+}
+
+// when origin has no `main` ref, DetectState must return
+// StateAhead (local commits will create main on the next push) instead of a
+// hard error.
+func TestDetectStateRemoteHasNoMain(t *testing.T) {
+	bareDir := t.TempDir()
+	initGitRepo(t, bareDir, true) // empty bare repo: no main ref
+
+	cloneDir := t.TempDir()
+	initGitRepo(t, cloneDir, false)
+	gitRun(t, cloneDir, "config", "user.email", "test@test.com")
+	gitRun(t, cloneDir, "config", "user.name", "test")
+	addCommitFile(t, cloneDir, "local.txt", "local only")
+	gitRun(t, cloneDir, "remote", "add", "origin", bareDir)
+
+	state, err := store.DetectState(cloneDir)
+	if err != nil {
+		t.Fatalf("DetectState: expected nil error when remote has no main, got: %v", err)
+	}
+	if state != store.StateAhead {
+		t.Errorf("want StateAhead when remote has no main, got %v", state)
+	}
+}
+
+// a detached HEAD must yield a clear error, not a silent rebase
+// onto a detached commit.
+func TestDetectStateDetachedHEAD(t *testing.T) {
+	bareDir, cloneDir := setupBareWithClone(t)
+	_ = bareDir
+
+	// Detach HEAD at the current commit.
+	head := strings.TrimSpace(gitRun(t, cloneDir, "rev-parse", "HEAD"))
+	gitRun(t, cloneDir, "checkout", "--detach", head)
+
+	_, err := store.DetectState(cloneDir)
+	if err == nil {
+		t.Fatal("DetectState: expected an error for detached HEAD, got nil")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "detached") {
+		t.Errorf("expected detached-HEAD error, got: %v", err)
 	}
 }
 

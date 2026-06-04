@@ -106,8 +106,16 @@ func RemoveEntry(excludePath, entry string) error {
 		}
 	}
 
-	if err := os.WriteFile(excludePath, []byte(strings.Join(filtered, "\n")), 0o644); err != nil {
-		return fmt.Errorf("writing exclude file: %w", err)
+	// Write atomically: write to a temp file then rename over the original, so a
+	// crash/ENOSPC mid-write cannot truncate the file and un-hide every other
+	// tracked entry at once. Mirrors registry.Save / writeProjectMetadata.
+	tmp := excludePath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(filtered, "\n")), 0o644); err != nil {
+		return fmt.Errorf("writing exclude temp file: %w", err)
+	}
+	if err := os.Rename(tmp, excludePath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("renaming exclude file into place: %w", err)
 	}
 	return nil
 }

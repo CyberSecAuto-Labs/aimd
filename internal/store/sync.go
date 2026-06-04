@@ -10,9 +10,21 @@ import (
 // DetectState fetches origin and returns the current sync state.
 // It does NOT modify the local working tree (fetch only, no pull).
 func DetectState(storeDir string) (SyncState, error) {
+	// A detached HEAD (e.g. an interrupted rebase) must not silently proceed to
+	// a rebase onto a detached commit. Surface a clear error instead.
+	if symErr := gitCmd("-C", storeDir, "symbolic-ref", "-q", "HEAD").Run(); symErr != nil {
+		return StateUpToDate, fmt.Errorf("local HEAD is detached (no current branch); resolve the repository state before syncing")
+	}
+
 	// Fetch latest from origin without touching the working tree.
-	fetchOut, err := exec.Command("git", "-C", storeDir, "fetch", "origin", "main").CombinedOutput()
+	fetchOut, err := gitCmd("-C", storeDir, "fetch", "origin", "main").CombinedOutput()
 	if err != nil {
+		// When the remote simply has no `main` ref yet (e.g. init's initial push
+		// failed offline, or the remote default branch differs), the local store
+		// is AHEAD: a subsequent push will create `main` from local commits.
+		if remoteMissingMainRef(string(fetchOut)) {
+			return StateAhead, nil
+		}
 		return StateUpToDate, fmt.Errorf("git fetch: %w — %s", err, strings.TrimSpace(string(fetchOut)))
 	}
 
@@ -21,9 +33,13 @@ func DetectState(storeDir string) (SyncState, error) {
 		return StateUpToDate, fmt.Errorf("resolve HEAD: %w", err)
 	}
 
-	remote, err := revParse(storeDir, "origin/main")
-	if err != nil {
-		return StateUpToDate, fmt.Errorf("resolve origin/main: %w", err)
+	remote, resolveErr := revParse(storeDir, "origin/main")
+	if resolveErr != nil {
+		// Fetch succeeded but origin/main is unresolvable — the remote has no
+		// main branch. Treat as AHEAD so a later push creates it. The resolve
+		// error is intentionally not propagated: a missing remote main is an
+		// expected state here, not a failure.
+		return StateAhead, nil //nolint:nilerr // missing remote main → AHEAD by design
 	}
 
 	if local == remote {
@@ -51,6 +67,14 @@ func DetectState(storeDir string) (SyncState, error) {
 	return StateDiverged, nil
 }
 
+// remoteMissingMainRef reports whether a `git fetch origin main` failure was
+// caused by the remote lacking a `main` ref (as opposed to a real transport or
+// auth error). git output is forced to English (LC_ALL=C) via gitCmd, so the
+// substring match is locale-stable.
+func remoteMissingMainRef(fetchOutput string) bool {
+	return strings.Contains(fetchOutput, "couldn't find remote ref")
+}
+
 // Sync brings the local store into sync with origin:
 //   - UP_TO_DATE: returns (StateUpToDate, nil) immediately.
 //   - BEHIND:     fast-forward pulls, returns (StateUpToDate, nil).
@@ -68,8 +92,8 @@ func Sync(storeDir string) (SyncState, error) {
 		return StateUpToDate, nil
 
 	case StateBehind:
-		pullOut, pullErr := exec.Command(
-			"git", "-C", storeDir, "pull", "--ff-only", "origin", "main",
+		pullOut, pullErr := gitCmd(
+			"-C", storeDir, "pull", "--ff-only", "origin", "main",
 		).CombinedOutput()
 		if pullErr != nil {
 			return StateBehind, fmt.Errorf("git pull --ff-only: %w — %s", pullErr, strings.TrimSpace(string(pullOut)))
@@ -80,8 +104,8 @@ func Sync(storeDir string) (SyncState, error) {
 		return StateAhead, nil
 
 	case StateDiverged:
-		rebaseOut, rebaseErr := exec.Command(
-			"git", "-C", storeDir,
+		rebaseOut, rebaseErr := gitCmd(
+			"-C", storeDir,
 			"-c", "user.email=aimd@localhost",
 			"-c", "user.name=aimd",
 			"pull", "--rebase", "origin", "main",
@@ -92,22 +116,39 @@ func Sync(storeDir string) (SyncState, error) {
 
 		// Rebase failed — detect conflicted files.
 		files, conflictErr := conflictedFiles(storeDir)
-		if conflictErr != nil {
-			// Abort the rebase to leave the repo clean before returning the error.
-			_ = exec.Command("git", "-C", storeDir, "rebase", "--abort").Run()
-			return StateConflict, fmt.Errorf("git pull --rebase: %w — %s", rebaseErr, strings.TrimSpace(string(rebaseOut)))
+
+		// Only treat this as a conflict when there are genuinely unmerged files.
+		// A non-conflict failure (e.g. dirty worktree, or conflictedFiles itself
+		// erroring) means the rebase failed for another reason: abort any started
+		// rebase and surface the real git error rather than an empty ConflictError.
+		if conflictErr == nil && len(files) > 0 {
+			return StateConflict, &ConflictError{Files: files}
 		}
 
-		return StateConflict, &ConflictError{Files: files}
+		// Abort the rebase to leave the repo clean before returning the error.
+		_ = gitCmd("-C", storeDir, "rebase", "--abort").Run()
+		return StateConflict, fmt.Errorf("git pull --rebase: %w — %s", rebaseErr, strings.TrimSpace(string(rebaseOut)))
 
 	default:
 		return state, nil
 	}
 }
 
+// Pull fast-forwards the store from origin/main and returns git's combined
+// output. It is best-effort: callers decide how to handle a non-nil error
+// (restore warns and continues from local state). Output is forced to English
+// (LC_ALL=C) via gitCmd so any caller inspection is locale-stable.
+func Pull(storeDir string) (string, error) {
+	out, err := gitCmd("-C", storeDir, "pull", "--ff-only", "origin", "main").CombinedOutput()
+	if err != nil {
+		return strings.TrimSpace(string(out)), fmt.Errorf("git pull --ff-only: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // revParse returns the full SHA for the given ref.
 func revParse(storeDir, ref string) (string, error) {
-	out, err := exec.Command("git", "-C", storeDir, "rev-parse", ref).CombinedOutput()
+	out, err := gitCmd("-C", storeDir, "rev-parse", ref).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse %s: %w — %s", ref, err, strings.TrimSpace(string(out)))
 	}
@@ -118,7 +159,7 @@ func revParse(storeDir, ref string) (string, error) {
 // `git merge-base --is-ancestor`. It returns (false, nil) when A is not
 // an ancestor; a non-nil error is returned only for unexpected failures.
 func isAncestor(storeDir, commitA, commitB string) (bool, error) {
-	cmd := exec.Command("git", "-C", storeDir, "merge-base", "--is-ancestor", commitA, commitB)
+	cmd := gitCmd("-C", storeDir, "merge-base", "--is-ancestor", commitA, commitB)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -134,8 +175,8 @@ func isAncestor(storeDir, commitA, commitB string) (bool, error) {
 // conflictedFiles returns the list of paths with unmerged changes after
 // a failed rebase.
 func conflictedFiles(storeDir string) ([]string, error) {
-	out, err := exec.Command(
-		"git", "-C", storeDir, "diff", "--name-only", "--diff-filter=U",
+	out, err := gitCmd(
+		"-C", storeDir, "diff", "--name-only", "--diff-filter=U",
 	).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only --diff-filter=U: %w — %s", err, strings.TrimSpace(string(out)))

@@ -6,7 +6,6 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -131,71 +130,52 @@ func syncProject(
 
 	// Step 2: Handle state.
 	switch state {
-	case store.StateUpToDate:
-		_, _ = fmt.Fprintf(out, "✓ %s: store up to date\n", displayName)
-		updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
-		return nil
-
 	case store.StateAhead:
-		// We are ahead — stage modified overlays and push if there's anything to commit.
-
-		// Build commit message.
-		// Title: "sync: <project> [<machine> <timestamp>]"
-		// Body:  "Synced files:\n  <file>\n  ..."
-		files := trackedFilePaths(projEntry)
-		title := fmt.Sprintf("sync: %s [%s %s]",
-			displayName, machineName,
-			time.Now().UTC().Format(time.RFC3339))
-
-		var msg string
-		if len(files) > 0 {
-			var sb strings.Builder
-			sb.WriteString(title)
-			sb.WriteString("\n\nSynced files:\n")
-			for _, f := range files {
-				sb.WriteString("  ")
-				sb.WriteString(f)
-				sb.WriteString("\n")
-			}
-			msg = sb.String()
-		} else {
-			msg = title
-		}
-
-		filesStr := strings.Join(files, ", ")
-
-		// CommitMsg stages repos/<key>/ (-u) and commits with the sync message.
-		// Returns an error if nothing was staged (nothing to commit).
-		if commitErr := store.CommitMsg(storeDir, projectKey, msg); commitErr != nil {
-			if isNothingToCommit(commitErr) {
-				_, _ = fmt.Fprintf(out, "✓ %s: nothing to sync\n", displayName)
-				updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
-				return nil
-			}
-			return fmt.Errorf("committing to store: %w", commitErr)
-		}
-
-		// Push (warn on failure, don't fail).
-		if pushErr := store.Push(storeDir); pushErr != nil {
-			var pe *store.PushError
-			if errors.As(pushErr, &pe) && !pe.Transient {
-				_, _ = fmt.Fprintf(out, "warning: push rejected (may need manual intervention): %s\n", pe.Output)
-			} else {
-				_, _ = fmt.Fprintf(out, "warning: could not push to remote — changes committed locally; will retry on next sync. Run `git -C %s push` manually if needed.\n", storeDir)
-			}
-		} else {
-			_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, filesStr)
-		}
-
-		updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
-		return nil
+		return syncAhead(storeDir, projectKey, displayName, projEntry, machineName, localPath, registryPath, reg, out)
 
 	default:
-		// StateUpToDate after BEHIND pull.
+		// UP_TO_DATE, or UP_TO_DATE reached after a BEHIND fast-forward. Nothing to
+		// commit; deliberately do NOT write the registry here — a lastSeen-only write
+		// that sync never commits is exactly what left the store worktree dirty and
+		// could later break a DIVERGED rebase. lastSeen is refreshed by
+		// track/untrack/restore and by an AHEAD sync that actually commits.
 		_, _ = fmt.Fprintf(out, "✓ %s: store up to date\n", displayName)
-		updateLastSeen(projEntry, machineName, localPath, reg, registryPath)
 		return nil
 	}
+}
+
+// syncAhead handles the AHEAD transition: when there are uncommitted overlay
+// changes it commits them with a refreshed registry + metadata, then pushes;
+// when AHEAD only because of prior unpushed commits, it just pushes them.
+func syncAhead(
+	storeDir, projectKey, displayName string,
+	projEntry *registry.Project,
+	machineName, localPath, registryPath string,
+	reg *registry.Registry,
+	out io.Writer,
+) error {
+	files := trackedFilePaths(projEntry)
+
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	if err != nil {
+		return fmt.Errorf("checking overlay status: %w", err)
+	}
+
+	if dirty {
+		if perr := persistChange(storeDir, projectKey, localPath, "sync", machineName, reg, projEntry, registryPath, files, out); perr != nil {
+			return perr
+		}
+		_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, strings.Join(files, ", "))
+		return nil
+	}
+
+	// No uncommitted overlay changes — just push the existing unpushed commits.
+	if pushErr := store.Push(storeDir); pushErr != nil {
+		warnOnPushError(pushErr, storeDir, out)
+		return nil
+	}
+	_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, strings.Join(files, ", "))
+	return nil
 }
 
 // trackedFilePaths returns the tracked file paths from the project entry.
@@ -210,17 +190,7 @@ func trackedFilePaths(proj *registry.Project) []string {
 	return paths
 }
 
-// updateLastSeen updates the machine's lastSeen timestamp in the registry and saves it.
-// Errors are silently ignored (lastSeen update is best-effort).
-func updateLastSeen(proj *registry.Project, machineName, localPath string, reg *registry.Registry, registryPath string) {
-	registry.UpsertMachine(proj, machineName, &registry.Machine{
-		LocalPath: localPath,
-		LastSeen:  time.Now().UTC(),
-	})
-	_ = registry.Save(registryPath, reg)
-}
-
-// isNothingToCommit returns true when the error from CommitMsg indicates that
+// isNothingToCommit returns true when the error from a store commit indicates that
 // git exited because there was nothing staged, not because of a real failure.
 // Git uses two variants: "nothing to commit" and "nothing added to commit".
 func isNothingToCommit(err error) bool {

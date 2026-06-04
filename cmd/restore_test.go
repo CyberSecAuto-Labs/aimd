@@ -447,6 +447,62 @@ func TestRunRestore_StoreNotInitialized(t *testing.T) {
 	}
 }
 
+func TestRunRestore_RejectsTrackedPathOutsideProjectRoot(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+
+	for _, d := range []string{projectDir, storeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	makeProjectWithRemote(t, projectDir)
+	// "../escapee.md" lands the overlay at store/repos/escapee.md and the
+	// destination at base/escapee.md — both climb out of their roots.
+	makeRestoreStore(t, storeDir, "github.com~test~myapp", projectDir, []string{filepath.Join("..", "escapee.md")})
+
+	// A real out-of-tree file the escaping destination resolves to.
+	outsideFile := filepath.Join(base, "escapee.md")
+	content := "important user data\n"
+	if err := os.WriteFile(outsideFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	// --force would otherwise replace the real file with a store symlink.
+	err = cmd.RunRestore(storeDir, "new-machine", true, false, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error restoring a tracked path outside the project root, got nil")
+	}
+
+	// The out-of-tree file must be untouched: still a regular file with its content.
+	fi, statErr := os.Lstat(outsideFile)
+	if statErr != nil {
+		t.Fatalf("outside file was disturbed: %v", statErr)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("outside file must not have been replaced with a symlink")
+	}
+	got, readErr := os.ReadFile(outsideFile)
+	if readErr != nil {
+		t.Fatalf("reading outside file: %v", readErr)
+	}
+	if string(got) != content {
+		t.Errorf("outside file content changed: got %q want %q", got, content)
+	}
+}
+
 func TestRunRestore_DirectoryAtDestination(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	base := t.TempDir()
