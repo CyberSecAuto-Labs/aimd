@@ -217,6 +217,7 @@ func scaffoldStore(storeDir, registryPath string, out io.Writer) error {
 		"-C", storeDir,
 		"-c", "user.email=aimd@localhost",
 		"-c", "user.name=aimd",
+		"-c", "commit.gpgsign=false",
 		"commit", "-m", "init: scaffold aimd store",
 	)
 	if gitOut, err := commitCmd.CombinedOutput(); err != nil {
