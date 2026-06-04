@@ -50,6 +50,24 @@ func TestExpandTargets_SkipsVCSDirs(t *testing.T) {
 	}
 }
 
+// an explicitly-named file inside a VCS directory must be rejected, otherwise
+// `aimd track .git/config` would relocate the repo's git internals into the
+// store and replace them with a symlink, corrupting the repository.
+func TestExpandTargets_RejectsExplicitVCSTarget(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitConfig := filepath.Join(dir, ".git", "config")
+	if err := os.WriteFile(gitConfig, []byte("[core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := expandTargets([]string{gitConfig}); err == nil {
+		t.Fatal("expected expandTargets to reject a .git target, got nil error")
+	}
+}
+
 // when CreateLink fails, trackFile must restore the original file from
 // the in-memory copy rather than leaving the project with no file.
 func TestTrackFile_RollbackRestoresOriginalOnLinkFailure(t *testing.T) {

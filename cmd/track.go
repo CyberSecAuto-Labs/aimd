@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -298,6 +300,13 @@ func isVCSDir(name string) bool {
 	}
 }
 
+// hasVCSComponent reports whether any element of path is a version-control
+// metadata directory. The directory walk skips these, but an explicitly-named
+// target inside one (e.g. `.git/config`) would otherwise slip through.
+func hasVCSComponent(path string) bool {
+	return slices.ContainsFunc(strings.Split(filepath.ToSlash(path), "/"), isVCSDir)
+}
+
 // expandTargets resolves each target (file or directory path) to a list of absolute file paths.
 // Directories are walked recursively; symlinks to directories are not followed.
 func expandTargets(targets []string) ([]string, error) {
@@ -310,6 +319,12 @@ func expandTargets(targets []string) ([]string, error) {
 				return nil, fmt.Errorf("getting working directory: %w", err)
 			}
 			abs = filepath.Join(cwd, target)
+		}
+
+		// A VCS metadata path named explicitly bypasses the walk's SkipDir guard,
+		// so reject it up front before any file is copied or relinked.
+		if hasVCSComponent(abs) {
+			return nil, fmt.Errorf("refusing to track %s: path is inside a version-control directory", target)
 		}
 
 		fi, err := os.Lstat(abs)
