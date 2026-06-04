@@ -104,6 +104,24 @@ func TestLoad_InvalidJSON_ReturnsParseError(t *testing.T) {
 	}
 }
 
+func TestLoad_NewerVersion_ReturnsErrUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "registry.json")
+
+	if err := os.WriteFile(path, []byte(`{"version":2,"projects":{}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := registry.Load(path)
+	if err == nil {
+		t.Fatal("Load() expected ErrUnsupportedVersion, got nil")
+	}
+	if !errors.Is(err, registry.ErrUnsupportedVersion) {
+		t.Errorf("Load() error = %v, want ErrUnsupportedVersion", err)
+	}
+}
+
 // ------------------------------------------------------------------
 // New
 // ------------------------------------------------------------------

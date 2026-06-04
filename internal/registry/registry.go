@@ -11,6 +11,11 @@ import (
 // ErrNotFound is returned by Load when the registry file does not exist.
 var ErrNotFound = errors.New("registry file not found")
 
+// ErrUnsupportedVersion is returned by Load when the registry's schema version
+// is newer than this build understands. Re-saving it as the older schema would
+// silently drop the newer fields, so Load refuses rather than risk that.
+var ErrUnsupportedVersion = errors.New("unsupported registry version")
+
 // Exists reports whether the registry file at path is present.
 func Exists(path string) (bool, error) {
 	_, err := os.Stat(path)
@@ -39,13 +44,16 @@ func Load(path string) (*Registry, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("parsing registry: %w", err)
 	}
+	if r.Version > SchemaVersion {
+		return nil, fmt.Errorf("%w: %d (this build supports up to %d)", ErrUnsupportedVersion, r.Version, SchemaVersion)
+	}
 	return &r, nil
 }
 
 // New returns an initialised empty Registry at version 1.
 func New() *Registry {
 	return &Registry{
-		Version:  1,
+		Version:  SchemaVersion,
 		Projects: map[string]*Project{},
 	}
 }

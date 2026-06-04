@@ -2,6 +2,9 @@ package registry
 
 import "time"
 
+// SchemaVersion is the registry schema version this build understands.
+const SchemaVersion = 1
+
 // Registry is the root structure persisted to registry.json.
 type Registry struct {
 	Version  int                 `json:"version"`
