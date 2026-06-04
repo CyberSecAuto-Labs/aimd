@@ -147,10 +147,6 @@ func OverlayDirty(storeDir, projectKey string) (bool, error) {
 func Push(storeDir string) error {
 	markerPath := pendingPushMarkerPath(storeDir)
 
-	// Check for an existing pending-push marker (best-effort; we proceed either way).
-	_, markerExists := os.Stat(markerPath)
-	_ = markerExists // we proceed with the push regardless
-
 	out, err := gitCmd("-C", storeDir, "push", "origin", "HEAD:main").CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 
