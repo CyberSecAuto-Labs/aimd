@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
+	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
 var restoreForce bool
@@ -45,9 +44,9 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 	}
 
 	// Step 1: Pull the store (warn on failure, continue).
-	pullOut, pullErr := exec.Command("git", "-C", storeDir, "pull", "--ff-only", "origin", "main").CombinedOutput()
+	pullOut, pullErr := store.Pull(storeDir)
 	if pullErr != nil {
-		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", strings.TrimSpace(string(pullOut)))
+		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", pullOut)
 	}
 
 	// Step 2: Determine link mode from config (fail fast on an unsupported mode,
