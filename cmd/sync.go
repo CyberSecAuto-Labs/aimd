@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -157,9 +156,9 @@ func syncAhead(
 ) error {
 	files := trackedFilePaths(projEntry)
 
-	dirty, err := overlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayDirty(storeDir, projectKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("checking overlay status: %w", err)
 	}
 
 	if dirty {
@@ -177,18 +176,6 @@ func syncAhead(
 	}
 	_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, strings.Join(files, ", "))
 	return nil
-}
-
-// overlayDirty reports whether the project's overlay directory has uncommitted
-// changes in the store worktree. A non-existent overlay path yields an empty
-// status (git treats a non-matching pathspec as no changes, exit 0).
-func overlayDirty(storeDir, projectKey string) (bool, error) {
-	reposRel := filepath.Join("repos", projectKey)
-	out, err := exec.Command("git", "-C", storeDir, "status", "--porcelain", "--", reposRel).CombinedOutput()
-	if err != nil {
-		return false, fmt.Errorf("git status: %w — %s", err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // trackedFilePaths returns the tracked file paths from the project entry.
