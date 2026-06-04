@@ -119,6 +119,7 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		"-C", storeDir,
 		"-c", "user.email=aimd@localhost",
 		"-c", "user.name=aimd",
+		"-c", "commit.gpgsign=false",
 		"commit", "-m", msg,
 	).CombinedOutput()
 	if err != nil {

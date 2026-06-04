@@ -108,6 +108,7 @@ func Sync(storeDir string) (SyncState, error) {
 			"-C", storeDir,
 			"-c", "user.email=aimd@localhost",
 			"-c", "user.name=aimd",
+			"-c", "commit.gpgsign=false",
 			"pull", "--rebase", "origin", "main",
 		).CombinedOutput()
 		if rebaseErr == nil {
