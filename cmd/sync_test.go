@@ -509,27 +509,100 @@ func TestSyncCmdAll_CommitMessageFormat(t *testing.T) {
 		t.Fatalf("write overlay update: %v", err)
 	}
 
-	// Create registry.
-	localPath := t.TempDir()
+	// Create registry. The local project root is named "myapp" so it appears in
+	// the commit subject (which uses filepath.Base of the project root).
+	localPath := filepath.Join(t.TempDir(), "myapp")
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		t.Fatalf("mkdir localPath: %v", err)
+	}
 	seedRegistry(t, cloneDir, "myapp", localPath, []string{"CLAUDE.md", "AGENTS.md"})
 
 	var out bytes.Buffer
-	err := cmd.RunSync(cloneDir, "my-machine", true, false, &out)
+	err := cmd.RunSync(cloneDir, "test-machine", true, false, &out)
 	if err != nil {
 		t.Fatalf("RunSync: %v", err)
 	}
 
 	outStr := out.String()
 
-	// Check if we got a sync commit (may be "up to date" if nothing staged).
-	if strings.Contains(outStr, "Synced") {
-		// Verify commit message format in bare repo.
-		log := syncGitRun(t, bareDir, "log", "--oneline", "-5")
-		if !strings.Contains(log, "sync:") {
-			t.Errorf("expected 'sync:' in commit log, got:\n%s", log)
+	// HEAD == origin/main with a dirty overlay must still produce a sync commit
+	// and push — not a false "up to date".
+	if !strings.Contains(outStr, "Synced") {
+		t.Fatalf("expected 'Synced' for dirty overlay at HEAD == origin/main, got:\n%s", outStr)
+	}
+
+	// Verify commit message format reached the bare origin.
+	log := syncGitRun(t, bareDir, "log", "--oneline", "-5")
+	if !strings.Contains(log, "sync:") {
+		t.Errorf("expected 'sync:' in commit log, got:\n%s", log)
+	}
+	if !strings.Contains(log, "myapp") {
+		t.Errorf("expected project name 'myapp' in commit log, got:\n%s", log)
+	}
+}
+
+// A dirty overlay must be committed and pushed even when the local commit graph
+// already matches origin (StateUpToDate). This is the common "I edited a tracked
+// file, then ran aimd sync" case: HEAD == origin/main, but the overlay worktree
+// is dirty. Regression test for the sync state machine skipping dirty overlays.
+func TestSyncCmdAll_UpToDateWithDirtyOverlayCommitsAndPushes(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Commit + push an initial overlay so HEAD == origin/main (StateUpToDate).
+	reposDir := filepath.Join(cloneDir, "repos", "myapp")
+	if err := os.MkdirAll(reposDir, 0o755); err != nil {
+		t.Fatalf("mkdir repos: %v", err)
+	}
+	overlayFile := filepath.Join(reposDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "myapp", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Edit the overlay WITHOUT committing — HEAD still equals origin/main, but the
+	// overlay worktree is now dirty.
+	if err := os.WriteFile(overlayFile, []byte("# updated\n"), 0o644); err != nil {
+		t.Fatalf("write overlay update: %v", err)
+	}
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "myapp", localPath, []string{"CLAUDE.md"})
+
+	var out bytes.Buffer
+	if err := cmd.RunSync(cloneDir, "test-machine", true, false, &out); err != nil {
+		t.Fatalf("RunSync: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Synced") {
+		t.Fatalf("expected dirty overlay to be Synced, got:\n%s", outStr)
+	}
+
+	// The store worktree must be clean afterward.
+	if status := strings.TrimSpace(syncGitRun(t, cloneDir, "status", "--porcelain")); status != "" {
+		t.Errorf("store worktree not clean after sync:\n%s", status)
+	}
+
+	// HEAD must be a new sync commit including overlay, registry, and metadata.
+	if head := syncGitRun(t, cloneDir, "log", "-1", "--format=%s"); !strings.Contains(head, "sync:") {
+		t.Errorf("expected 'sync:' HEAD commit, got: %s", head)
+	}
+	changed := syncGitRun(t, cloneDir, "show", "--name-only", "--format=", "HEAD")
+	for _, want := range []string{
+		filepath.Join("repos", "myapp", "CLAUDE.md"),
+		filepath.Join(".aimd", "registry.json"),
+		filepath.Join("metadata", "myapp.json"),
+	} {
+		if !strings.Contains(changed, want) {
+			t.Errorf("expected sync commit to include %s, got:\n%s", want, changed)
 		}
-		if !strings.Contains(log, "myapp") {
-			t.Errorf("expected project name 'myapp' in commit log, got:\n%s", log)
-		}
+	}
+
+	// The bare origin must contain the sync commit.
+	if bareLog := syncGitRun(t, bareDir, "log", "--oneline", "main"); !strings.Contains(bareLog, "sync:") {
+		t.Errorf("expected 'sync:' commit in bare origin, got:\n%s", bareLog)
 	}
 }
