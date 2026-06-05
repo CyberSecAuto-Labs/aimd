@@ -392,3 +392,35 @@ func TestCommitWithUnknownVerb(t *testing.T) {
 		t.Errorf("commit body missing 'Import files:'; got: %q", logOut)
 	}
 }
+
+// aimd's machine-generated store commits must not inherit the user's global
+// commit-signing config: with commit.gpgsign=true and a broken signing program,
+// a normal `git commit` would fail, but aimd commits must still succeed because
+// they disable inherited signing.
+func TestCommitSucceedsWithGlobalGPGSigningEnabled(t *testing.T) {
+	const projectKey = "gpgkey"
+	storeDir, registryFile := setupStoreRepo(t, projectKey)
+
+	// Force-enable commit signing globally with a signing program that always
+	// fails. Applied AFTER setup so only the aimd commit under test is affected.
+	fakeGPG := filepath.Join(t.TempDir(), "fail-gpg")
+	if err := os.WriteFile(fakeGPG, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake gpg program: %v", err)
+	}
+	globalCfg := filepath.Join(t.TempDir(), "gitconfig")
+	cfg := "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = " + fakeGPG + "\n"
+	if err := os.WriteFile(globalCfg, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write global gitconfig: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", globalCfg)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	// Modify registry.json so there is something to commit.
+	if err := os.WriteFile(registryFile, []byte(`{"updated":true}`), 0o600); err != nil {
+		t.Fatalf("write registry.json: %v", err)
+	}
+
+	if err := store.Commit(storeDir, projectKey, "/home/user/proj", "track", "m", nil); err != nil {
+		t.Fatalf("store.Commit must succeed despite global commit.gpgsign=true: %v", err)
+	}
+}

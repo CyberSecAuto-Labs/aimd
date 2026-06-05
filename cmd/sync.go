@@ -128,38 +128,16 @@ func syncProject(
 		return fmt.Errorf("syncing store: %w", err)
 	}
 
-	// Step 2: Handle state.
-	switch state {
-	case store.StateAhead:
-		return syncAhead(storeDir, projectKey, displayName, projEntry, machineName, localPath, registryPath, reg, out)
-
-	default:
-		// UP_TO_DATE, or UP_TO_DATE reached after a BEHIND fast-forward. Nothing to
-		// commit; deliberately do NOT write the registry here — a lastSeen-only write
-		// that sync never commits is exactly what left the store worktree dirty and
-		// could later break a DIVERGED rebase. lastSeen is refreshed by
-		// track/untrack/restore and by an AHEAD sync that actually commits.
-		_, _ = fmt.Fprintf(out, "✓ %s: store up to date\n", displayName)
-		return nil
-	}
-}
-
-// syncAhead handles the AHEAD transition: when there are uncommitted overlay
-// changes it commits them with a refreshed registry + metadata, then pushes;
-// when AHEAD only because of prior unpushed commits, it just pushes them.
-func syncAhead(
-	storeDir, projectKey, displayName string,
-	projEntry *registry.Project,
-	machineName, localPath, registryPath string,
-	reg *registry.Registry,
-	out io.Writer,
-) error {
-	files := trackedFilePaths(projEntry)
-
+	// Step 2: A dirty overlay must always be committed and pushed, regardless of
+	// how the local commit graph compares to origin. Local edits to a tracked
+	// file leave the overlay worktree dirty while HEAD still equals origin/main
+	// (StateUpToDate) — keying only off StateAhead would silently drop them.
 	dirty, err := store.OverlayDirty(storeDir, projectKey)
 	if err != nil {
 		return fmt.Errorf("checking overlay status: %w", err)
 	}
+
+	files := trackedFilePaths(projEntry)
 
 	if dirty {
 		if perr := persistChange(storeDir, projectKey, localPath, "sync", machineName, reg, projEntry, registryPath, files, out); perr != nil {
@@ -169,12 +147,22 @@ func syncAhead(
 		return nil
 	}
 
-	// No uncommitted overlay changes — just push the existing unpushed commits.
-	if pushErr := store.Push(storeDir); pushErr != nil {
-		warnOnPushError(pushErr, storeDir, out)
+	// Clean overlay. AHEAD only because of prior unpushed commits → just push them.
+	if state == store.StateAhead {
+		if pushErr := store.Push(storeDir); pushErr != nil {
+			warnOnPushError(pushErr, storeDir, out)
+			return nil
+		}
+		_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, strings.Join(files, ", "))
 		return nil
 	}
-	_, _ = fmt.Fprintf(out, "✓ Synced: %s/%s\n", displayName, strings.Join(files, ", "))
+
+	// UP_TO_DATE, or UP_TO_DATE reached after a BEHIND fast-forward. Nothing to
+	// commit; deliberately do NOT write the registry here — a lastSeen-only write
+	// that sync never commits is exactly what left the store worktree dirty and
+	// could later break a DIVERGED rebase. lastSeen is refreshed by
+	// track/untrack/restore and by a sync that actually commits a dirty overlay.
+	_, _ = fmt.Fprintf(out, "✓ %s: store up to date\n", displayName)
 	return nil
 }
 

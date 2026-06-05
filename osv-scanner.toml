@@ -1,0 +1,24 @@
+# osv-scanner configuration — https://google.github.io/osv-scanner/configuration/
+#
+# Division of labor between our two vulnerability gates (both required checks in
+# .github/workflows/security.yml, run on every PR and every push to main):
+#
+#   - govulncheck : owns the Go standard library. It is reachability-aware —
+#                   it only fails when aimd actually calls the vulnerable symbol.
+#   - osv-scanner : owns third-party / transitive dependencies. It matches by
+#                   declared version with no reachability analysis.
+#
+# osv-scanner reads the `go` directive in go.mod (a minimum-compat floor, kept
+# deliberately low) as if it were the stdlib version we build with, so it flags
+# every stdlib advisory fixed after that floor — regardless of whether the code
+# is reachable. That is govulncheck's job, and govulncheck stays green here, so
+# we let osv-scanner ignore stdlib vulnerabilities and focus on dependencies.
+#
+# This does not reduce coverage: any stdlib vuln that becomes reachable will
+# fail govulncheck (a required check) and block the merge.
+
+[[PackageOverrides]]
+name = "stdlib"
+ecosystem = "Go"
+vulnerability.ignore = true
+reason = "Go stdlib is gated by govulncheck (reachability-aware, required check); osv-scanner covers third-party deps only. See comment above."

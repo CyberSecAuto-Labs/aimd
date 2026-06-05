@@ -3,6 +3,8 @@ name: security
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
   schedule:
     - cron: "0 8 * * 1"  # Monday 08:00 UTC
 
@@ -34,14 +36,18 @@ jobs:
       - name: Verify module
         run: go mod verify
 
+  # osv-scanner-action v2 is published as a reusable workflow, not a step action
+  # (its root action.yml has no `runs:` section). SARIF is uploaded to the
+  # Security tab only on push to main; on PRs we just run the gate.
   osv-scanner:
     name: osv-scanner
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: OSV Scanner
-        uses: google/osv-scanner-action@v2
-        with:
-          scan-args: |-
-            --recursive
-            ./
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.8
+    with:
+      scan-args: |-
+        --recursive
+        ./
+      upload-sarif: ${{ github.event_name == 'push' }}
