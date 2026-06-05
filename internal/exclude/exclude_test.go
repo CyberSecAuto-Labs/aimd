@@ -2,6 +2,7 @@ package exclude_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,7 +68,8 @@ func TestAppendEntry_PreservesExistingEntries(t *testing.T) {
 }
 
 func TestAppendEntry_NoTrailingNewlineSafe(t *testing.T) {
-	// Write content without a trailing newline, then append.
+	// Write a bare user line without a trailing newline, then append. The managed
+	// block must start on its own line and the user line must survive verbatim.
 	path := excludePath(t)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -82,10 +84,14 @@ func TestAppendEntry_NoTrailingNewlineSafe(t *testing.T) {
 	if err != nil || !ok {
 		t.Errorf("expected CLAUDE.md to be present; ok=%v err=%v", ok, err)
 	}
-	// "existing" should still be there.
-	ok, err = exclude.HasEntry(path, "existing")
-	if err != nil || !ok {
-		t.Errorf("expected existing to be preserved; ok=%v err=%v", ok, err)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	// The user's bare line is preserved and not merged into the block marker.
+	if !strings.HasPrefix(string(data), "existing\n") {
+		t.Errorf("expected file to start with the preserved user line; got:\n%s", data)
 	}
 }
 
@@ -182,11 +188,12 @@ func TestRemoveEntry_FileNotExist(t *testing.T) {
 
 func TestRemoveEntry_MultipleOccurrences(t *testing.T) {
 	path := excludePath(t)
-	// Manually write a file with duplicate entries.
+	// Manually write a managed block that contains a duplicated entry — RemoveEntry
+	// must strip every occurrence inside the block.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	content := "CLAUDE.md\nother.md\nCLAUDE.md\n"
+	content := "# >>> aimd managed block (do not edit by hand)\nCLAUDE.md\nother.md\nCLAUDE.md\n# <<< aimd managed block\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -306,5 +313,175 @@ func TestMultiEntry_AppendHasRemove(t *testing.T) {
 		if err != nil || !ok {
 			t.Errorf("expected %q to remain; ok=%v err=%v", e, ok, err)
 		}
+	}
+}
+
+// --- Managed block ---
+
+const (
+	blockStart = "# >>> aimd managed block (do not edit by hand)"
+	blockEnd   = "# <<< aimd managed block"
+)
+
+// AppendEntry must wrap entries in the delimited block and write the
+// explanatory header on first creation.
+func TestAppendEntry_WrapsInManagedBlock(t *testing.T) {
+	path := excludePath(t)
+	if err := exclude.AppendEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, blockStart) || !strings.Contains(s, blockEnd) {
+		t.Errorf("expected managed-block delimiters; got:\n%s", s)
+	}
+	// A header line explaining the block must be present.
+	if !strings.Contains(s, "managed by aimd") && !strings.Contains(s, "ABOVE or BELOW") {
+		t.Errorf("expected explanatory header; got:\n%s", s)
+	}
+	// The entry sits between the markers.
+	start := strings.Index(s, blockStart)
+	end := strings.Index(s, blockEnd)
+	if start < 0 || end < 0 || start > end {
+		t.Fatalf("markers out of order; got:\n%s", s)
+	}
+	if !strings.Contains(s[start:end], "CLAUDE.md") {
+		t.Errorf("expected CLAUDE.md inside the block; got:\n%s", s)
+	}
+}
+
+// A user's hand-authored line outside the block must survive both append and
+// removal of an aimd entry — this is the core shared-ownership safety property.
+func TestManagedBlock_UserLinesUntouched(t *testing.T) {
+	path := excludePath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Two user lines: one above where the block will be appended.
+	if err := os.WriteFile(path, []byte("# my own notes\n.env.local\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := exclude.AppendEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+	if err := exclude.RemoveEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "# my own notes") || !strings.Contains(s, ".env.local") {
+		t.Errorf("expected user lines to survive; got:\n%s", s)
+	}
+	// Block fully removed once emptied.
+	if strings.Contains(s, blockStart) || strings.Contains(s, blockEnd) {
+		t.Errorf("expected empty block to be removed; got:\n%s", s)
+	}
+}
+
+// Removing the last entry removes the whole block (delimiters + header).
+func TestRemoveEntry_RemovesEmptyBlock(t *testing.T) {
+	path := excludePath(t)
+	if err := exclude.AppendEntry(path, "only.md"); err != nil {
+		t.Fatalf("AppendEntry: %v", err)
+	}
+	if err := exclude.RemoveEntry(path, "only.md"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), "aimd managed block") {
+		t.Errorf("expected block markers gone; got:\n%s", data)
+	}
+}
+
+// A bare line outside any managed block is the user's; RemoveEntry must not
+// touch it, and HasEntry must not report it as an aimd entry.
+func TestBareLine_NotManaged(t *testing.T) {
+	path := excludePath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("CLAUDE.md\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ok, err := exclude.HasEntry(path, "CLAUDE.md")
+	if err != nil {
+		t.Fatalf("HasEntry: %v", err)
+	}
+	if ok {
+		t.Error("expected bare line outside the block to NOT be reported as managed")
+	}
+
+	if err := exclude.RemoveEntry(path, "CLAUDE.md"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "CLAUDE.md") {
+		t.Errorf("expected bare user line left untouched; got:\n%s", data)
+	}
+}
+
+// --- CheckIgnore ---
+
+func gitInit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+func TestCheckIgnore_IgnoredByUserPattern(t *testing.T) {
+	dir := gitInit(t)
+	excl := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(excl, []byte(".context/\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile exclude: %v", err)
+	}
+
+	ignored, source, pattern, err := exclude.CheckIgnore(dir, ".context/notes.md")
+	if err != nil {
+		t.Fatalf("CheckIgnore: %v", err)
+	}
+	if !ignored {
+		t.Fatal("expected path to be ignored by the user pattern")
+	}
+	if pattern != ".context/" {
+		t.Errorf("pattern = %q, want %q", pattern, ".context/")
+	}
+	if !strings.Contains(source, "exclude") {
+		t.Errorf("source = %q, want it to reference the exclude file", source)
+	}
+}
+
+func TestCheckIgnore_NotIgnored(t *testing.T) {
+	dir := gitInit(t)
+	ignored, _, _, err := exclude.CheckIgnore(dir, "CLAUDE.md")
+	if err != nil {
+		t.Fatalf("CheckIgnore: %v", err)
+	}
+	if ignored {
+		t.Error("expected path NOT to be ignored with an empty exclude file")
 	}
 }

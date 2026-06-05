@@ -128,6 +128,49 @@ func TestRunUntrack_Restore_HappyPath(t *testing.T) {
 	}
 }
 
+// When a surviving user pattern still ignores the restored file, untrack
+// --restore must warn the user with the matching pattern.
+func TestRunUntrack_Restore_WarnsWhenUserPatternShadows(t *testing.T) {
+	// Not parallel — uses os.Chdir which affects the whole process.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir, storeDir, _, _ := setupTrackedFile(t)
+	defer func() { _ = os.Chdir(orig) }()
+
+	// Add a bare user pattern outside aimd's managed block that also ignores the
+	// file. After untrack removes the managed entry, this pattern still shadows it.
+	excl := filepath.Join(projectDir, ".git", "info", "exclude")
+	f, err := os.OpenFile(excl, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open exclude: %v", err)
+	}
+	if _, err := f.WriteString("\n*.md\n"); err != nil {
+		t.Fatalf("write user pattern: %v", err)
+	}
+	_ = f.Close()
+
+	var out bytes.Buffer
+	if err := cmd.RunUntrack(
+		[]string{"CLAUDE.md"}, storeDir, "test-machine",
+		false, true, false,
+		strings.NewReader(""), &out,
+	); err != nil {
+		t.Fatalf("RunUntrack() error = %v", err)
+	}
+
+	s := out.String()
+	if !strings.Contains(s, "still ignored") {
+		t.Errorf("expected a shadow warning; got output:\n%s", s)
+	}
+	if !strings.Contains(s, "*.md") {
+		t.Errorf("expected the matching pattern in the warning; got output:\n%s", s)
+	}
+}
+
 func TestRunUntrack_Delete_HappyPath(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 

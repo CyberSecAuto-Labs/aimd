@@ -215,7 +215,7 @@ func untrackFile(
 	if deleteMode {
 		return deleteTrackedFile(abs, overlayPath, excludePath, relPath, linkMode, proj, out)
 	}
-	return restoreTrackedFile(abs, overlayPath, excludePath, relPath, linkMode, proj, out)
+	return restoreTrackedFile(abs, gitRoot, overlayPath, excludePath, relPath, linkMode, proj, out)
 }
 
 // deleteTrackedFile removes the overlay and symlink without restoring content.
@@ -238,7 +238,7 @@ func deleteTrackedFile(abs, overlayPath, excludePath, relPath string, linkMode l
 }
 
 // restoreTrackedFile copies the overlay back to the project directory and removes the symlink and overlay.
-func restoreTrackedFile(abs, overlayPath, excludePath, relPath string, linkMode link.LinkMode, proj *registry.Project, out io.Writer) error {
+func restoreTrackedFile(abs, gitRoot, overlayPath, excludePath, relPath string, linkMode link.LinkMode, proj *registry.Project, out io.Writer) error {
 	content, err := os.ReadFile(overlayPath)
 	if err != nil {
 		return fmt.Errorf("reading overlay %s: %w", overlayPath, err)
@@ -261,6 +261,13 @@ func restoreTrackedFile(abs, overlayPath, excludePath, relPath string, linkMode 
 	}
 	registry.RemoveTrackedFile(proj, relPath)
 	_, _ = fmt.Fprintf(out, "✓ Untracked %s (restored to project)\n", relPath)
+
+	// After removing our managed exclude entry, a surviving user pattern (e.g.
+	// ".context/") can still hide the file we just restored. Probe and warn so the
+	// user isn't surprised that a real file is missing from git status.
+	if ignored, source, pattern, cerr := exclude.CheckIgnore(gitRoot, relPath); cerr == nil && ignored {
+		_, _ = fmt.Fprintf(out, "⚠ %s is still ignored by git (pattern %q in %s); remove that pattern to make the file visible.\n", relPath, pattern, source)
+	}
 	return nil
 }
 
