@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	resolveOurs   bool
-	resolveTheirs bool
-	resolveAbort  bool
+	resolveKeepLocal  bool
+	resolveKeepRemote bool
+	resolveAbort      bool
 )
 
 var resolveCmd = &cobra.Command{
@@ -40,18 +40,19 @@ pushes. With no editor configured, aimd prints the path and instructions and you
 re-run the same command once the markers are gone.
 
 Shorthands skip the editor:
-  --ours    keep the upstream version (origin/main — what was rebased onto)
-  --theirs  keep your local commit's version being replayed
-  (during a rebase these sides are inverted relative to a normal merge)
+  --keep-local   keep your version of the file — the local commit being replayed
+                 (runs git checkout --theirs during the rebase)
+  --keep-remote  keep the remote version — origin/main, which the rebase replays
+                 onto (runs git checkout --ours during the rebase)
 
-  --abort   abort the rebase and restore the store to its pre-sync state`,
+  --abort        abort the rebase and restore the store to its pre-sync state`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var file string
 		if len(args) > 0 {
 			file = args[0]
 		}
-		return RunResolve(storePath, file, resolveOurs, resolveTheirs, resolveAbort, dryRun, cmd.OutOrStdout())
+		return RunResolve(storePath, file, resolveKeepLocal, resolveKeepRemote, resolveAbort, dryRun, cmd.OutOrStdout())
 	},
 }
 
@@ -59,15 +60,15 @@ Shorthands skip the editor:
 //
 // storeDir is the resolved path to ~/.aimd/store. fileArg is the conflicted path
 // as printed by aimd sync (store-relative, or an absolute path under the store).
-// ours/theirs select a side without opening an editor; abort aborts the rebase.
-// dryRun prints what would happen without touching the store. out receives all
-// user-facing output.
-func RunResolve(storeDir, fileArg string, ours, theirs, abort, dryRun bool, out io.Writer) error {
+// keepLocal/keepRemote select a side without opening an editor; abort aborts the
+// rebase. dryRun prints what would happen without touching the store. out
+// receives all user-facing output.
+func RunResolve(storeDir, fileArg string, keepLocal, keepRemote, abort, dryRun bool, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
 	}
-	if ours && theirs {
-		return fmt.Errorf("--ours and --theirs are mutually exclusive")
+	if keepLocal && keepRemote {
+		return fmt.Errorf("--keep-local and --keep-remote are mutually exclusive")
 	}
 	if !store.RebaseInProgress(storeDir) {
 		return fmt.Errorf("no rebase in progress — nothing to resolve (run `aimd sync` first)")
@@ -83,20 +84,22 @@ func RunResolve(storeDir, fileArg string, ours, theirs, abort, dryRun bool, out 
 	}
 
 	if dryRun {
-		return resolveDryRun(relPath, ours, theirs, out)
+		return resolveDryRun(relPath, keepLocal, keepRemote, out)
 	}
 
 	switch {
-	case ours:
+	case keepRemote:
+		// origin/main is "ours" during a rebase (the branch being replayed onto).
 		if rerr := store.ResolveOurs(storeDir, relPath); rerr != nil {
-			return fmt.Errorf("resolving with our version: %w", rerr)
+			return fmt.Errorf("keeping the remote version: %w", rerr)
 		}
-		_, _ = fmt.Fprintf(out, "resolved %s using our version\n", relPath)
-	case theirs:
+		_, _ = fmt.Fprintf(out, "resolved %s keeping the remote version\n", relPath)
+	case keepLocal:
+		// the local commit being replayed is "theirs" during a rebase.
 		if rerr := store.ResolveTheirs(storeDir, relPath); rerr != nil {
-			return fmt.Errorf("resolving with their version: %w", rerr)
+			return fmt.Errorf("keeping your local version: %w", rerr)
 		}
-		_, _ = fmt.Fprintf(out, "resolved %s using their version\n", relPath)
+		_, _ = fmt.Fprintf(out, "resolved %s keeping your local version\n", relPath)
 	default:
 		done, eerr := resolveWithEditor(storeDir, relPath, absPath, out)
 		if eerr != nil || !done {
@@ -142,12 +145,12 @@ func resolveTarget(storeDir, fileArg string) (relPath, absPath string, err error
 }
 
 // resolveDryRun reports what resolve would do without modifying the store.
-func resolveDryRun(relPath string, ours, theirs bool, out io.Writer) error {
+func resolveDryRun(relPath string, keepLocal, keepRemote bool, out io.Writer) error {
 	switch {
-	case ours:
-		_, _ = fmt.Fprintf(out, "dry-run: would resolve %s using our version, then continue the rebase\n", relPath)
-	case theirs:
-		_, _ = fmt.Fprintf(out, "dry-run: would resolve %s using their version, then continue the rebase\n", relPath)
+	case keepRemote:
+		_, _ = fmt.Fprintf(out, "dry-run: would resolve %s keeping the remote version, then continue the rebase\n", relPath)
+	case keepLocal:
+		_, _ = fmt.Fprintf(out, "dry-run: would resolve %s keeping your local version, then continue the rebase\n", relPath)
 	default:
 		_, _ = fmt.Fprintf(out, "dry-run: would open %s in $EDITOR, then continue the rebase\n", relPath)
 	}
@@ -245,8 +248,8 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func init() {
-	resolveCmd.Flags().BoolVar(&resolveOurs, "ours", false, "Keep the upstream version (origin/main) without opening an editor")
-	resolveCmd.Flags().BoolVar(&resolveTheirs, "theirs", false, "Keep your local commit's version without opening an editor")
+	resolveCmd.Flags().BoolVar(&resolveKeepLocal, "keep-local", false, "Keep your local version of the file without opening an editor")
+	resolveCmd.Flags().BoolVar(&resolveKeepRemote, "keep-remote", false, "Keep the remote (origin/main) version without opening an editor")
 	resolveCmd.Flags().BoolVar(&resolveAbort, "abort", false, "Abort the rebase and restore the store to its pre-sync state")
 	rootCmd.AddCommand(resolveCmd)
 }

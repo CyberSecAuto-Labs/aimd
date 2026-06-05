@@ -83,7 +83,7 @@ func TestResolveStoreMissing(t *testing.T) {
 	}
 }
 
-func TestResolveOursAndTheirsMutuallyExclusive(t *testing.T) {
+func TestResolveKeepFlagsMutuallyExclusive(t *testing.T) {
 	cloneDir, _, rel := setupResolveConflict(t)
 
 	var out bytes.Buffer
@@ -93,45 +93,45 @@ func TestResolveOursAndTheirsMutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestResolveOursCompletesAndPushes(t *testing.T) {
+func TestResolveKeepRemoteCompletesAndPushes(t *testing.T) {
 	cloneDir, bareDir, rel := setupResolveConflict(t)
 
 	var out bytes.Buffer
-	if err := cmd.RunResolve(cloneDir, rel, true, false, false, false, &out); err != nil {
-		t.Fatalf("RunResolve --ours: %v", err)
+	if err := cmd.RunResolve(cloneDir, rel, false, true /* keepRemote */, false, false, &out); err != nil {
+		t.Fatalf("RunResolve --keep-remote: %v", err)
 	}
 	if !strings.Contains(out.String(), "Resolved and synced") {
 		t.Errorf("expected success message, got:\n%s", out.String())
 	}
 
-	// "ours" during a rebase keeps the upstream (origin) version. The replayed
-	// local commit becomes empty (its content already matches origin) and is
-	// dropped, leaving HEAD == origin/main — the push is a clean no-op.
+	// --keep-remote keeps origin's version. The replayed local commit becomes empty
+	// (its content already matches origin) and is dropped, leaving HEAD ==
+	// origin/main — the push is a clean no-op.
 	got, _ := os.ReadFile(filepath.Join(cloneDir, rel))
 	if string(got) != "remote version\n" {
-		t.Errorf("want upstream content, got %q", string(got))
+		t.Errorf("want remote content, got %q", string(got))
 	}
 
-	// The store's overlay on the bare origin reflects the resolved (upstream) content.
+	// The store's overlay on the bare origin reflects the resolved (remote) content.
 	if show := syncGitRun(t, bareDir, "show", "main:"+filepath.ToSlash(rel)); show != "remote version\n" {
-		t.Errorf("want origin overlay = upstream content, got %q", show)
+		t.Errorf("want origin overlay = remote content, got %q", show)
 	}
 }
 
-func TestResolveTheirsKeepsLocal(t *testing.T) {
+func TestResolveKeepLocalKeepsLocal(t *testing.T) {
 	cloneDir, bareDir, rel := setupResolveConflict(t)
 
 	var out bytes.Buffer
-	if err := cmd.RunResolve(cloneDir, rel, false, true, false, false, &out); err != nil {
-		t.Fatalf("RunResolve --theirs: %v", err)
+	if err := cmd.RunResolve(cloneDir, rel, true /* keepLocal */, false, false, false, &out); err != nil {
+		t.Fatalf("RunResolve --keep-local: %v", err)
 	}
 	got, _ := os.ReadFile(filepath.Join(cloneDir, rel))
 	if string(got) != "local version\n" {
 		t.Errorf("want local content, got %q", string(got))
 	}
 
-	// "theirs" keeps the local version, which differs from origin, so the replayed
-	// commit is non-empty and is pushed to the bare origin.
+	// --keep-local keeps the local version, which differs from origin, so the
+	// replayed commit is non-empty and is pushed to the bare origin.
 	if log := syncGitRun(t, bareDir, "log", "--oneline", "main"); !strings.Contains(log, "local overlay") {
 		t.Errorf("expected local commit replayed onto origin, got:\n%s", log)
 	}
@@ -268,7 +268,7 @@ func TestResolveReportsFurtherConflicts(t *testing.T) {
 
 	// Resolve the first conflict; continuing must surface the second.
 	var out bytes.Buffer
-	err := cmd.RunResolve(cloneDir, relA, true /* ours */, false, false, false, &out)
+	err := cmd.RunResolve(cloneDir, relA, false, true /* keepRemote */, false, false, &out)
 	if err == nil {
 		t.Fatalf("expected a further-conflict error, got nil\n%s", out.String())
 	}
@@ -309,7 +309,7 @@ func TestResolveDryRun(t *testing.T) {
 	headBefore := strings.TrimSpace(syncGitRun(t, cloneDir, "rev-parse", "HEAD"))
 
 	var out bytes.Buffer
-	if err := cmd.RunResolve(cloneDir, rel, true /* ours */, false, false, true /* dryRun */, &out); err != nil {
+	if err := cmd.RunResolve(cloneDir, rel, false, true /* keepRemote */, false, true /* dryRun */, &out); err != nil {
 		t.Fatalf("RunResolve dry-run: %v", err)
 	}
 	if !strings.Contains(out.String(), "dry-run") {
