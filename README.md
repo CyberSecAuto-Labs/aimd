@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Work in progress — not ready for use.** This project is under active development. APIs, commands, and file formats will change without notice.
 
-Track, sync, and restore your AI .md files across machines without committing them to your project repository.
+Keep your private AI context files (`CLAUDE.md`, `AGENTS.md`) out of shared repos, versioned and synced through your own Git store.
 
 ## What it does
 
@@ -49,7 +49,7 @@ The core file tracking and sync engine is under development.
 | `aimd restore` | ✅ implemented |
 | `aimd status` | 🚧 not yet implemented |
 | `aimd watch` | 🚧 not yet implemented |
-| `aimd resolve` | 🚧 not yet implemented |
+| `aimd resolve` | ✅ implemented |
 | `aimd doctor` | 🚧 not yet implemented |
 
 ## Install
