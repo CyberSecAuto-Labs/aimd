@@ -304,20 +304,20 @@ func TestPushMarkerClearedOnSuccess(t *testing.T) {
 	}
 }
 
-func TestOverlayDirtyCleanWorktree(t *testing.T) {
+func TestOverlayProjectDirtyCleanWorktree(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
-	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayProjectDirty(storeDir, projectKey)
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if dirty {
-		t.Error("OverlayDirty = true on a committed overlay, want false")
+		t.Error("OverlayProjectDirty = true on a committed overlay, want false")
 	}
 }
 
-func TestOverlayDirtyUncommittedChange(t *testing.T) {
+func TestOverlayProjectDirtyUncommittedChange(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
@@ -327,12 +327,12 @@ func TestOverlayDirtyUncommittedChange(t *testing.T) {
 		t.Fatalf("write overlay file: %v", err)
 	}
 
-	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayProjectDirty(storeDir, projectKey)
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if !dirty {
-		t.Error("OverlayDirty = false on an uncommitted overlay change, want true")
+		t.Error("OverlayProjectDirty = false on an uncommitted overlay change, want true")
 	}
 }
 
@@ -371,17 +371,17 @@ func TestOverlayFileDirtyIsolatesPaths(t *testing.T) {
 	}
 }
 
-func TestOverlayDirtyMissingOverlay(t *testing.T) {
+func TestOverlayProjectDirtyMissingOverlay(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
 	// A project key with no overlay directory yields an empty status.
-	dirty, err := store.OverlayDirty(storeDir, "nonexistent")
+	dirty, err := store.OverlayProjectDirty(storeDir, "nonexistent")
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if dirty {
-		t.Error("OverlayDirty = true for a missing overlay, want false")
+		t.Error("OverlayProjectDirty = true for a missing overlay, want false")
 	}
 }
 

@@ -129,10 +129,10 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 	return nil
 }
 
-// OverlayDirty reports whether the project's overlay directory has uncommitted
+// OverlayProjectDirty reports whether the project's overlay directory has uncommitted
 // changes in the store worktree. A non-existent overlay path yields an empty
 // status (git treats a non-matching pathspec as no changes, exit 0).
-func OverlayDirty(storeDir, projectKey string) (bool, error) {
+func OverlayProjectDirty(storeDir, projectKey string) (bool, error) {
 	reposRel := filepath.Join("repos", projectKey)
 	out, err := gitCmd("-C", storeDir, "status", "--porcelain", "--", reposRel).CombinedOutput()
 	if err != nil {

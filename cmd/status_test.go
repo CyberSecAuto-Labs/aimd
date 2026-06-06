@@ -207,7 +207,7 @@ func TestRunStatus_Modified(t *testing.T) {
 	}})
 	symlinkOverlay(t, storeDir, "github.com~test~myapp", projectDir, "CLAUDE.md")
 
-	// Edit the overlay so OverlayDirty reports uncommitted changes.
+	// Edit the overlay so OverlayProjectDirty reports uncommitted changes.
 	overlay := filepath.Join(storeDir, "repos", "github.com~test~myapp", "CLAUDE.md")
 	if err := os.WriteFile(overlay, []byte("# locally edited\n"), 0o644); err != nil {
 		t.Fatal(err)
