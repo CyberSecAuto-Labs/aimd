@@ -28,6 +28,26 @@ func DetectState(storeDir string) (SyncState, error) {
 		return StateUpToDate, fmt.Errorf("git fetch: %w — %s", err, strings.TrimSpace(string(fetchOut)))
 	}
 
+	return compareLocalRemote(storeDir)
+}
+
+// DetectStateOffline returns the current sync state WITHOUT contacting the
+// remote: it compares local HEAD against the already-fetched origin/main
+// remote-tracking ref. The caller is responsible for any prior fetch. This is
+// the read-only variant used by `aimd status` (offline by default per the
+// status command's design). It shares the post-fetch comparison logic with
+// DetectState via compareLocalRemote.
+func DetectStateOffline(storeDir string) (SyncState, error) {
+	if symErr := gitCmd("-C", storeDir, "symbolic-ref", "-q", "HEAD").Run(); symErr != nil {
+		return StateUpToDate, fmt.Errorf("local HEAD is detached (no current branch); resolve the repository state before syncing")
+	}
+	return compareLocalRemote(storeDir)
+}
+
+// compareLocalRemote resolves local HEAD and origin/main and classifies their
+// relationship. It performs no network access — both DetectState (after a
+// fetch) and DetectStateOffline (no fetch) call it for the comparison step.
+func compareLocalRemote(storeDir string) (SyncState, error) {
 	local, err := revParse(storeDir, "HEAD")
 	if err != nil {
 		return StateUpToDate, fmt.Errorf("resolve HEAD: %w", err)
@@ -35,10 +55,10 @@ func DetectState(storeDir string) (SyncState, error) {
 
 	remote, resolveErr := revParse(storeDir, "origin/main")
 	if resolveErr != nil {
-		// Fetch succeeded but origin/main is unresolvable — the remote has no
-		// main branch. Treat as AHEAD so a later push creates it. The resolve
-		// error is intentionally not propagated: a missing remote main is an
-		// expected state here, not a failure.
+		// origin/main is unresolvable — the remote has no main branch (or it has
+		// never been fetched). Treat as AHEAD so a later push creates it. The
+		// resolve error is intentionally not propagated: a missing remote main is
+		// an expected state here, not a failure.
 		return StateAhead, nil //nolint:nilerr // missing remote main → AHEAD by design
 	}
 
