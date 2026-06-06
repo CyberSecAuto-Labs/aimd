@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	statusAll   bool
-	statusFetch bool
+	statusAll         bool
+	statusAllMachines bool
+	statusFetch       bool
 )
 
 var statusCmd = &cobra.Command{
@@ -28,12 +29,13 @@ var statusCmd = &cobra.Command{
 	Long: `Inspect tracked files and the store without modifying anything.
 
 By default status reports the current project only. Use --all to report every
-tracked project. status is read-only and offline by default: it compares the
-store against the last-fetched origin/main without contacting the remote. Pass
---fetch to refresh the remote-tracking ref first.`,
+tracked project. Use --all-machines to also list the other machines tracking
+each reported project. status is read-only and offline by default: it compares
+the store against the last-fetched origin/main without contacting the remote.
+Pass --fetch to refresh the remote-tracking ref first.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return RunStatus(storePath, machine, statusAll, statusFetch, cmd.OutOrStdout())
+		return RunStatus(storePath, machine, statusAll, statusAllMachines, statusFetch, cmd.OutOrStdout())
 	},
 }
 
@@ -65,9 +67,10 @@ func (s fileState) icon() string {
 // storeDir is the resolved path to ~/.aimd/store.
 // machineName identifies the current machine.
 // all reports every tracked project instead of just the current one.
+// allMachines lists the other machines tracking each reported project.
 // fetch refreshes origin/main before comparing the store (otherwise offline).
 // out receives all user-facing output.
-func RunStatus(storeDir, machineName string, all, fetch bool, out io.Writer) error {
+func RunStatus(storeDir, machineName string, all, allMachines, fetch bool, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
 	}
@@ -102,7 +105,7 @@ func RunStatus(storeDir, machineName string, all, fetch bool, out io.Writer) err
 	printHeader(out, storeDir, machineName, reg, keys, fetch)
 
 	for _, t := range targets {
-		printProject(out, storeDir, machineName, reg.Projects[t.key], t.key, t.root, linkMode, all)
+		printProject(out, storeDir, machineName, reg.Projects[t.key], t.key, t.root, linkMode, allMachines)
 	}
 
 	return nil
@@ -232,9 +235,9 @@ func storeSyncLine(storeDir string, fetch bool) string {
 	}
 }
 
-// printProject prints a project's name, its per-file state rows, and (only in
-// --all mode) the cross-machine "also tracked on" block.
-func printProject(out io.Writer, storeDir, machineName string, proj *registry.Project, key, root string, linkMode link.LinkMode, all bool) {
+// printProject prints a project's name, its per-file state rows, and (only when
+// allMachines is set) the cross-machine "also tracked on" block.
+func printProject(out io.Writer, storeDir, machineName string, proj *registry.Project, key, root string, linkMode link.LinkMode, allMachines bool) {
 	if proj == nil {
 		return
 	}
@@ -257,7 +260,7 @@ func printProject(out io.Writer, storeDir, machineName string, proj *registry.Pr
 		}
 	}
 
-	if all {
+	if allMachines {
 		printCrossMachine(out, proj, machineName)
 	}
 }
@@ -345,6 +348,7 @@ func relativeTime(t time.Time) string {
 
 func init() {
 	statusCmd.Flags().BoolVar(&statusAll, "all", false, "Report every tracked project, not just the current one")
+	statusCmd.Flags().BoolVar(&statusAllMachines, "all-machines", false, "List the other machines tracking each reported project")
 	statusCmd.Flags().BoolVar(&statusFetch, "fetch", false, "Fetch origin/main before reporting store sync state")
 	rootCmd.AddCommand(statusCmd)
 }
