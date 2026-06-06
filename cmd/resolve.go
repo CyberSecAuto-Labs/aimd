@@ -184,6 +184,21 @@ func resolveWithEditor(storeDir, relPath, absPath string, out io.Writer) (bool, 
 		return false, fmt.Errorf("conflict markers remain in %s — resolve them, then run `aimd resolve %s` again", relPath, relPath)
 	}
 
+	// No markers. For an ordinary content conflict that means the user removed
+	// them — safe to stage. But some unmerged states (notably modify/delete) never
+	// carry markers, so marker-absence is not proof of an intended resolution.
+	// Refuse those and require an explicit side choice rather than silently
+	// staging whichever version git happened to leave in the worktree.
+	ours, theirs, sErr := store.UnmergedSides(storeDir, relPath)
+	if sErr != nil {
+		return false, fmt.Errorf("checking unmerged state of %s: %w", relPath, sErr)
+	}
+	if ours != theirs { // exactly one side present → modify/delete, not a content conflict
+		return false, fmt.Errorf(
+			"%s is a modify/delete conflict (changed on one side, deleted on the other) — choose explicitly with `aimd resolve --keep-local %s` or `aimd resolve --keep-remote %s`",
+			relPath, relPath, relPath)
+	}
+
 	if err := store.StageResolution(storeDir, relPath); err != nil {
 		return false, fmt.Errorf("staging %s: %w", relPath, err)
 	}

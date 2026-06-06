@@ -62,6 +62,125 @@ func writeOverlay(t *testing.T, dir, rel, content string) {
 	}
 }
 
+// setupModifyDeleteConflict builds a store where the overlay was modified on the
+// remote and deleted locally, runs aimd sync to stall on the resulting
+// modify/delete rebase conflict, and returns the store clone, the bare origin,
+// and the conflicted store-relative path. Unlike a content conflict, the
+// worktree carries no conflict markers — the modified (remote) side is left in
+// the tree, yet the path is still unmerged.
+func setupModifyDeleteConflict(t *testing.T) (cloneDir, bareDir, conflictRel string) {
+	t.Helper()
+
+	bareDir, cloneDir = setupSyncBareWithClone(t)
+	conflictRel = filepath.Join("repos", "test-proj", "CLAUDE.md")
+
+	// Shared base: commit + push the overlay so both sides descend from a commit
+	// that contains the file (a modify/delete needs the file present at base).
+	writeOverlay(t, cloneDir, conflictRel, "base\n")
+	syncGitRun(t, cloneDir, "add", conflictRel)
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "base overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Remote modifies the overlay.
+	pusherDir := t.TempDir()
+	if out, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, out)
+	}
+	syncGitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	syncGitRun(t, pusherDir, "config", "user.name", "test")
+	writeOverlay(t, pusherDir, conflictRel, "remote modified\n")
+	syncGitRun(t, pusherDir, "add", conflictRel)
+	syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "remote modifies overlay")
+	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	// Local deletes the overlay.
+	syncGitRun(t, cloneDir, "rm", conflictRel)
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "local deletes overlay")
+
+	seedRegistry(t, cloneDir, "test-proj", t.TempDir(), []string{"CLAUDE.md"})
+
+	var out bytes.Buffer
+	if err := cmd.RunSync(cloneDir, "test-machine", true, false, &out); err == nil {
+		t.Fatalf("setupModifyDeleteConflict: expected a conflict from RunSync, got nil\n%s", out.String())
+	}
+	if !rebaseInProgress(cloneDir) {
+		t.Fatal("setupModifyDeleteConflict: expected a rebase in progress")
+	}
+	return cloneDir, bareDir, conflictRel
+}
+
+func TestResolveModifyDeleteDefaultPathRefuses(t *testing.T) {
+	cloneDir, bareDir, rel := setupModifyDeleteConflict(t)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	bareHeadBefore := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main"))
+
+	var out bytes.Buffer
+	// Default path (no flags, no editor): the file has no markers but is unmerged
+	// as a modify/delete — aimd must refuse rather than silently pick a side.
+	err := cmd.RunResolve(cloneDir, rel, false, false, false, false, &out)
+	if err == nil {
+		t.Fatalf("want refusal error for modify/delete on default path, got nil\noutput:\n%s", out.String())
+	}
+	if !strings.Contains(err.Error(), "keep-local") || !strings.Contains(err.Error(), "keep-remote") {
+		t.Errorf("error should direct the user to --keep-local/--keep-remote, got: %v", err)
+	}
+	// Nothing was resolved: rebase still in progress, origin unchanged.
+	if !rebaseInProgress(cloneDir) {
+		t.Error("rebase must remain in progress after a refused modify/delete")
+	}
+	if bareHeadAfter := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main")); bareHeadAfter != bareHeadBefore {
+		t.Errorf("origin must be untouched after refusal: before=%s after=%s", bareHeadBefore, bareHeadAfter)
+	}
+}
+
+func TestResolveModifyDeleteKeepRemoteKeepsFile(t *testing.T) {
+	cloneDir, bareDir, rel := setupModifyDeleteConflict(t)
+
+	var out bytes.Buffer
+	if err := cmd.RunResolve(cloneDir, rel, false, true /* keepRemote */, false, false, &out); err != nil {
+		t.Fatalf("RunResolve --keep-remote on modify/delete: %v\noutput:\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Resolved and synced") {
+		t.Errorf("expected success, got:\n%s", out.String())
+	}
+	// keep-remote keeps the remote-modified file.
+	got, err := os.ReadFile(filepath.Join(cloneDir, rel))
+	if err != nil {
+		t.Fatalf("overlay should exist after --keep-remote: %v", err)
+	}
+	if string(got) != "remote modified\n" {
+		t.Errorf("want remote content, got %q", string(got))
+	}
+	if show := syncGitRun(t, bareDir, "show", "main:"+filepath.ToSlash(rel)); show != "remote modified\n" {
+		t.Errorf("want origin overlay = remote content, got %q", show)
+	}
+}
+
+func TestResolveModifyDeleteKeepLocalRemovesFile(t *testing.T) {
+	cloneDir, bareDir, rel := setupModifyDeleteConflict(t)
+
+	var out bytes.Buffer
+	if err := cmd.RunResolve(cloneDir, rel, true /* keepLocal */, false, false, false, &out); err != nil {
+		t.Fatalf("RunResolve --keep-local on modify/delete: %v\noutput:\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Resolved and synced") {
+		t.Errorf("expected success, got:\n%s", out.String())
+	}
+	// keep-local takes the local side, which deleted the file.
+	if _, statErr := os.Stat(filepath.Join(cloneDir, rel)); !os.IsNotExist(statErr) {
+		t.Errorf("overlay should be gone after --keep-local, stat err = %v", statErr)
+	}
+	// Origin must no longer contain the overlay at main.
+	if _, err := exec.Command("git", "-C", bareDir, "cat-file", "-e", "main:"+filepath.ToSlash(rel)).CombinedOutput(); err == nil {
+		t.Error("origin should not contain the overlay after --keep-local removed it")
+	}
+}
+
 func TestResolveNoRebaseInProgress(t *testing.T) {
 	_, cloneDir := setupSyncBareWithClone(t)
 
