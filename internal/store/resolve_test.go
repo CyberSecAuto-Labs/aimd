@@ -45,6 +45,113 @@ func setupConflict(t *testing.T) (cloneDir, conflictFile string) {
 	return cloneDir, "conflict.txt"
 }
 
+// setupModifyDelete creates a modify/delete rebase conflict: a shared base file
+// is modified on the remote and deleted locally. store.Sync stalls the rebase
+// with HEAD's (remote) modified version left in the tree and no markers. Returns
+// the clone directory and the conflicted file name.
+func setupModifyDelete(t *testing.T) (cloneDir, conflictFile string) {
+	t.Helper()
+
+	bareDir, cloneDir := setupBareWithClone(t)
+	conflictFile = "md.txt"
+
+	// Shared base containing the file.
+	addCommitFile(t, cloneDir, conflictFile, "base\n")
+	gitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Remote modifies the file.
+	pusherDir := t.TempDir()
+	if out, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, out)
+	}
+	gitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	gitRun(t, pusherDir, "config", "user.name", "test")
+	addCommitFile(t, pusherDir, conflictFile, "remote modified\n")
+	gitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	// Local deletes the file.
+	gitRun(t, cloneDir, "rm", conflictFile)
+	gitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "local deletes "+conflictFile)
+
+	state, err := store.Sync(cloneDir)
+	if err == nil || state != store.StateConflict {
+		t.Fatalf("setupModifyDelete: want StateConflict, got state=%v err=%v", state, err)
+	}
+	return cloneDir, conflictFile
+}
+
+func TestUnmergedSides(t *testing.T) {
+	// Content conflict: both sides present.
+	contentClone, contentFile := setupConflict(t)
+	ours, theirs, err := store.UnmergedSides(contentClone, contentFile)
+	if err != nil {
+		t.Fatalf("UnmergedSides (content): %v", err)
+	}
+	if !ours || !theirs {
+		t.Errorf("content conflict should have both sides, got ours=%v theirs=%v", ours, theirs)
+	}
+
+	// Modify/delete: exactly one side (the modified remote = ours during rebase).
+	mdClone, mdFile := setupModifyDelete(t)
+	ours, theirs, err = store.UnmergedSides(mdClone, mdFile)
+	if err != nil {
+		t.Fatalf("UnmergedSides (modify/delete): %v", err)
+	}
+	if !ours || theirs {
+		t.Errorf("modify/delete (remote modified) should have only ours, got ours=%v theirs=%v", ours, theirs)
+	}
+
+	// A clean, non-unmerged path: neither side.
+	_, cleanClone := setupBareWithClone(t)
+	ours, theirs, err = store.UnmergedSides(cleanClone, "init.txt")
+	if err != nil {
+		t.Fatalf("UnmergedSides (clean): %v", err)
+	}
+	if ours || theirs {
+		t.Errorf("clean path should report no sides, got ours=%v theirs=%v", ours, theirs)
+	}
+}
+
+func TestResolveTheirsRemovesDeletedSide(t *testing.T) {
+	// Local deleted the file; --keep-local (theirs) must resolve by removing it,
+	// not error because the theirs side has no content to check out.
+	cloneDir, mdFile := setupModifyDelete(t)
+
+	if err := store.ResolveTheirs(cloneDir, mdFile); err != nil {
+		t.Fatalf("ResolveTheirs on modify/delete: %v", err)
+	}
+	state, err := store.ContinueRebase(cloneDir)
+	if err != nil {
+		t.Fatalf("ContinueRebase: %v", err)
+	}
+	if state != store.StateAhead {
+		t.Errorf("want StateAhead after resolution, got %v", state)
+	}
+	if _, statErr := os.Stat(filepath.Join(cloneDir, mdFile)); !os.IsNotExist(statErr) {
+		t.Errorf("file should be removed after taking the deleting side, stat err = %v", statErr)
+	}
+}
+
+func TestResolveOursKeepsModifiedSide(t *testing.T) {
+	// Remote modified the file; --keep-remote (ours) keeps that modified version.
+	cloneDir, mdFile := setupModifyDelete(t)
+
+	if err := store.ResolveOurs(cloneDir, mdFile); err != nil {
+		t.Fatalf("ResolveOurs on modify/delete: %v", err)
+	}
+	if _, err := store.ContinueRebase(cloneDir); err != nil {
+		t.Fatalf("ContinueRebase: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(cloneDir, mdFile))
+	if err != nil {
+		t.Fatalf("file should exist after keeping the modified side: %v", err)
+	}
+	if string(got) != "remote modified\n" {
+		t.Errorf("want remote-modified content, got %q", string(got))
+	}
+}
+
 func TestRebaseInProgress(t *testing.T) {
 	_, cloneDir := setupBareWithClone(t)
 	if store.RebaseInProgress(cloneDir) {
