@@ -47,10 +47,11 @@ The core file tracking and sync engine is under development.
 | `aimd untrack` | ✅ implemented |
 | `aimd sync` | ✅ implemented |
 | `aimd restore` | ✅ implemented |
-| `aimd status` | 🚧 not yet implemented |
+| `aimd status` | ✅ implemented |
 | `aimd watch` | 🚧 not yet implemented |
 | `aimd resolve` | ✅ implemented |
 | `aimd doctor` | 🚧 not yet implemented |
+| `aimd log` | 🚧 not yet implemented |
 
 ## Install
 
