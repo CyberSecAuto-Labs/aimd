@@ -304,20 +304,20 @@ func TestPushMarkerClearedOnSuccess(t *testing.T) {
 	}
 }
 
-func TestOverlayDirtyCleanWorktree(t *testing.T) {
+func TestOverlayProjectDirtyCleanWorktree(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
-	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayProjectDirty(storeDir, projectKey)
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if dirty {
-		t.Error("OverlayDirty = true on a committed overlay, want false")
+		t.Error("OverlayProjectDirty = true on a committed overlay, want false")
 	}
 }
 
-func TestOverlayDirtyUncommittedChange(t *testing.T) {
+func TestOverlayProjectDirtyUncommittedChange(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
@@ -327,26 +327,61 @@ func TestOverlayDirtyUncommittedChange(t *testing.T) {
 		t.Fatalf("write overlay file: %v", err)
 	}
 
-	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayProjectDirty(storeDir, projectKey)
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if !dirty {
-		t.Error("OverlayDirty = false on an uncommitted overlay change, want true")
+		t.Error("OverlayProjectDirty = false on an uncommitted overlay change, want true")
 	}
 }
 
-func TestOverlayDirtyMissingOverlay(t *testing.T) {
+func TestOverlayFileDirtyIsolatesPaths(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, _ := setupStoreRepo(t, projectKey)
+
+	// Add a second overlay file and commit, so the project has two clean files.
+	reposDir := filepath.Join(storeDir, "repos", projectKey)
+	if err := os.WriteFile(filepath.Join(reposDir, "other.txt"), []byte("other"), 0o600); err != nil {
+		t.Fatalf("write other.txt: %v", err)
+	}
+	gitRun(t, storeDir, "add", ".")
+	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "add other")
+
+	// Edit only file.txt.
+	if err := os.WriteFile(filepath.Join(reposDir, "file.txt"), []byte("changed"), 0o600); err != nil {
+		t.Fatalf("edit file.txt: %v", err)
+	}
+
+	dirty, err := store.OverlayFileDirty(storeDir, projectKey, "file.txt")
+	if err != nil {
+		t.Fatalf("OverlayFileDirty(file.txt): %v", err)
+	}
+	if !dirty {
+		t.Error("OverlayFileDirty(file.txt) = false, want true (it was edited)")
+	}
+
+	clean, err := store.OverlayFileDirty(storeDir, projectKey, "other.txt")
+	if err != nil {
+		t.Fatalf("OverlayFileDirty(other.txt): %v", err)
+	}
+	if clean {
+		t.Error("OverlayFileDirty(other.txt) = true, want false (untouched)")
+	}
+}
+
+func TestOverlayProjectDirtyMissingOverlay(t *testing.T) {
 	const projectKey = "mykey"
 	storeDir, _ := setupStoreRepo(t, projectKey)
 
 	// A project key with no overlay directory yields an empty status.
-	dirty, err := store.OverlayDirty(storeDir, "nonexistent")
+	dirty, err := store.OverlayProjectDirty(storeDir, "nonexistent")
 	if err != nil {
-		t.Fatalf("store.OverlayDirty: %v", err)
+		t.Fatalf("store.OverlayProjectDirty: %v", err)
 	}
 	if dirty {
-		t.Error("OverlayDirty = true for a missing overlay, want false")
+		t.Error("OverlayProjectDirty = true for a missing overlay, want false")
 	}
 }
 

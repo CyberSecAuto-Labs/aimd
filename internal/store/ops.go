@@ -129,11 +129,24 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 	return nil
 }
 
-// OverlayDirty reports whether the project's overlay directory has uncommitted
+// OverlayProjectDirty reports whether the project's overlay directory has uncommitted
 // changes in the store worktree. A non-existent overlay path yields an empty
 // status (git treats a non-matching pathspec as no changes, exit 0).
-func OverlayDirty(storeDir, projectKey string) (bool, error) {
+func OverlayProjectDirty(storeDir, projectKey string) (bool, error) {
 	reposRel := filepath.Join("repos", projectKey)
+	out, err := gitCmd("-C", storeDir, "status", "--porcelain", "--", reposRel).CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git status: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// OverlayFileDirty reports whether a single tracked overlay file has uncommitted
+// changes in the store worktree. relPath is the project-relative path of the
+// tracked file (e.g. "CLAUDE.md"); it is scoped to repos/<projectKey>/<relPath>
+// so the answer reflects that file alone, not the whole project overlay.
+func OverlayFileDirty(storeDir, projectKey, relPath string) (bool, error) {
+	reposRel := filepath.Join("repos", projectKey, relPath)
 	out, err := gitCmd("-C", storeDir, "status", "--porcelain", "--", reposRel).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("git status: %w — %s", err, strings.TrimSpace(string(out)))

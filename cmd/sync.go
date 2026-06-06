@@ -132,7 +132,7 @@ func syncProject(
 	// how the local commit graph compares to origin. Local edits to a tracked
 	// file leave the overlay worktree dirty while HEAD still equals origin/main
 	// (StateUpToDate) — keying only off StateAhead would silently drop them.
-	dirty, err := store.OverlayDirty(storeDir, projectKey)
+	dirty, err := store.OverlayProjectDirty(storeDir, projectKey)
 	if err != nil {
 		return fmt.Errorf("checking overlay status: %w", err)
 	}
