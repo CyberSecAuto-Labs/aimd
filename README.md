@@ -30,7 +30,7 @@ The tracked file stays available in your project directory (via symlink), is hid
 2. `aimd sync` commits changes and pushes to your private remote — or pulls and rebases if the remote has newer changes.
 3. `aimd restore` recreates the symlink on any machine after a fresh clone.
 
-No server. No daemon. No cloud dependency beyond a standard Git remote (GitHub, GitLab, Gitea, or self-hosted).
+No cloud dependency beyond a standard Git remote (GitHub, GitLab, Gitea, or self-hosted).
 
 <p align="center">
   <img src="docs/assets/architecture.svg" alt="Architecture" width="300" />
