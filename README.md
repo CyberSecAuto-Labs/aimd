@@ -52,6 +52,7 @@ The core file tracking and sync engine is under development.
 | `aimd resolve` | ✅ implemented |
 | `aimd doctor` | 🚧 not yet implemented |
 | `aimd log` | 🚧 not yet implemented |
+| `aimd remove` | 🚧 not yet implemented |
 
 ## Install
 
