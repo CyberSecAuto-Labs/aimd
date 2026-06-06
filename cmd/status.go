@@ -248,10 +248,17 @@ func printProject(out io.Writer, storeDir, machineName string, proj *registry.Pr
 	}
 	_, _ = fmt.Fprintf(out, "%s\n", name)
 
+	// A lingering project whose last file was untracked: surface it (rather than
+	// dropping it silently) with a hint to forget it once `aimd remove` exists.
+	if len(proj.Tracked) == 0 {
+		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", name)
+		return
+	}
+
 	for _, tf := range proj.Tracked {
 		overlaySrc := filepath.Join(storeDir, "repos", key, tf.Path)
 		projectDst := filepath.Join(root, tf.Path)
-		st := computeFileState(storeDir, key, overlaySrc, projectDst, linkMode)
+		st := computeFileState(storeDir, key, tf.Path, overlaySrc, projectDst, linkMode)
 		note := stateNote(st)
 		if note != "" {
 			_, _ = fmt.Fprintf(out, "  %s %s    %s\n", st.icon(), tf.Path, note)
@@ -279,10 +286,18 @@ func stateNote(st fileState) string {
 }
 
 // computeFileState resolves exactly one state for a tracked file, applying the
-// precedence conflict > broken > modified > synced.
-func computeFileState(storeDir, key, overlaySrc, projectDst string, linkMode link.LinkMode) fileState {
-	// conflict: an interrupted rebase left markers in this overlay file.
+// precedence conflict > broken > modified > synced. relPath is the tracked
+// file's project-relative path, used to scope the dirty check to this file.
+func computeFileState(storeDir, key, relPath, overlaySrc, projectDst string, linkMode link.LinkMode) fileState {
+	// conflict: an interrupted rebase left this overlay unmerged. Drive ⚡ from
+	// git's index state (authoritative — catches modify/delete conflicts that
+	// leave no marker text); a marker scan stays as an additional signal for a
+	// content conflict whose worktree file still carries <<<<<<< markers.
 	if store.RebaseInProgress(storeDir) {
+		storeRel := filepath.Join("repos", key, relPath)
+		if ours, theirs, err := store.UnmergedSides(storeDir, storeRel); err == nil && (ours || theirs) {
+			return stateConflict
+		}
 		if hasMarkers, err := store.HasConflictMarkers(overlaySrc); err == nil && hasMarkers {
 			return stateConflict
 		}
@@ -300,8 +315,8 @@ func computeFileState(storeDir, key, overlaySrc, projectDst string, linkMode lin
 		return stateBroken
 	}
 
-	// modified: link is valid but the overlay has uncommitted local edits.
-	if dirty, err := store.OverlayDirty(storeDir, key); err == nil && dirty {
+	// modified: link is valid but this file's overlay has uncommitted local edits.
+	if dirty, err := store.OverlayFileDirty(storeDir, key, relPath); err == nil && dirty {
 		return stateModified
 	}
 

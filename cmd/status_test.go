@@ -228,6 +228,50 @@ func TestRunStatus_Modified(t *testing.T) {
 	}
 }
 
+// TestRunStatus_Modified_PerFile proves modified state is per-file: editing one
+// tracked overlay must not mark the other tracked file in the same project ✎.
+func TestRunStatus_Modified_PerFile(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	makeProjectWithRemote(t, projectDir)
+	makeStatusStore(t, storeDir, []statusProject{{
+		key: "github.com~test~myapp", display: "myapp", root: projectDir,
+		tracked:  []string{"CLAUDE.md", "AGENTS.md"},
+		machines: map[string]string{"this-machine": projectDir},
+	}})
+	symlinkOverlay(t, storeDir, "github.com~test~myapp", projectDir, "CLAUDE.md")
+	symlinkOverlay(t, storeDir, "github.com~test~myapp", projectDir, "AGENTS.md")
+
+	// Edit only the CLAUDE.md overlay; AGENTS.md stays committed-clean.
+	overlay := filepath.Join(storeDir, "repos", "github.com~test~myapp", "CLAUDE.md")
+	if err := os.WriteFile(overlay, []byte("# locally edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, projectDir)
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "✎ CLAUDE.md") {
+		t.Errorf("expected CLAUDE.md modified (✎), got:\n%s", got)
+	}
+	if !strings.Contains(got, "✓ AGENTS.md") {
+		t.Errorf("expected AGENTS.md synced (✓) — modified state leaked across files, got:\n%s", got)
+	}
+}
+
 func TestRunStatus_Broken(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	base := t.TempDir()
@@ -306,6 +350,71 @@ func TestRunStatus_Conflict(t *testing.T) {
 	}
 }
 
+// TestRunStatus_Conflict_ModifyDelete proves conflict detection is index-driven,
+// not marker-driven: a modify/delete rebase conflict leaves the overlay unmerged
+// in the index with a clean, marker-free worktree file. status must still show ⚡
+// (pointing the user at `aimd resolve`), not ✎ or ✗.
+func TestRunStatus_Conflict_ModifyDelete(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	base := t.TempDir()
+	projectDir := filepath.Join(base, "project")
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	makeProjectWithRemote(t, projectDir)
+	makeStatusStore(t, storeDir, []statusProject{{
+		key: "github.com~test~myapp", display: "myapp", root: projectDir,
+		tracked:  []string{"CLAUDE.md"},
+		machines: map[string]string{"this-machine": projectDir},
+	}})
+	symlinkOverlay(t, storeDir, "github.com~test~myapp", projectDir, "CLAUDE.md")
+
+	overlayRel := filepath.ToSlash(filepath.Join("repos", "github.com~test~myapp", "CLAUDE.md"))
+	overlayAbs := filepath.Join(storeDir, "repos", "github.com~test~myapp", "CLAUDE.md")
+
+	// Capture the branch makeStatusStore committed on (master under isolated config).
+	bb, err := exec.Command("git", "-C", storeDir, "branch", "--show-current").Output()
+	if err != nil {
+		t.Fatalf("branch --show-current: %v", err)
+	}
+	baseBranch := strings.TrimSpace(string(bb))
+
+	// feature: modify the overlay. base: delete it. Rebasing feature onto base
+	// replays the modify onto a delete → modify/delete conflict, no markers.
+	runGit(t, [][]string{{"git", "-C", storeDir, "checkout", "-b", "feature"}})
+	if err := os.WriteFile(overlayAbs, []byte("# modified on feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, [][]string{
+		{"git", "-C", storeDir, "commit", "-am", "modify overlay on feature"},
+		{"git", "-C", storeDir, "checkout", baseBranch},
+		{"git", "-C", storeDir, "rm", overlayRel},
+		{"git", "-C", storeDir, "commit", "-m", "delete overlay on base"},
+		{"git", "-C", storeDir, "checkout", "feature"},
+	})
+	// Expected to exit non-zero (the conflict stops the rebase).
+	_ = exec.Command("git", "-C", storeDir, "rebase", baseBranch).Run()
+
+	chdir(t, projectDir)
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "⚡ CLAUDE.md") {
+		t.Errorf("modify/delete conflict must show ⚡, got:\n%s", got)
+	}
+	if strings.Contains(got, "✎ CLAUDE.md") || strings.Contains(got, "✗ CLAUDE.md") {
+		t.Errorf("modify/delete conflict must not show ✎/✗, got:\n%s", got)
+	}
+}
+
 func TestRunStatus_EmptyRegistry(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	base := t.TempDir()
@@ -333,6 +442,42 @@ func TestRunStatus_EmptyRegistry(t *testing.T) {
 	}
 	if strings.Contains(got, "aimd •") {
 		t.Errorf("empty state must not print the header:\n%s", got)
+	}
+}
+
+// TestRunStatus_All_EmptyProjectShowsRemoveHint covers a project whose last file
+// was untracked: the registry entry lingers with an empty tracked list. Under
+// --all it must still be listed with a hint to run `aimd remove`, NOT silently
+// dropped and NOT trigger the "No projects tracked" empty-state message.
+func TestRunStatus_All_EmptyProjectShowsRemoveHint(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	appA := filepath.Join(base, "appA")
+	for _, d := range []string{storeDir, appA} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	makeStatusStore(t, storeDir, []statusProject{{
+		key: "github.com~test~appA", display: "appA", root: appA,
+		tracked:  nil, // last file untracked; project entry remains
+		machines: map[string]string{"this-machine": appA},
+	}})
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+		t.Fatalf("RunStatus --all: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "appA") {
+		t.Errorf("expected lingering project still listed, got:\n%s", got)
+	}
+	if !strings.Contains(got, "aimd remove") {
+		t.Errorf("expected `aimd remove` hint under empty project, got:\n%s", got)
+	}
+	if strings.Contains(got, "No projects tracked") {
+		t.Errorf("--all with a lingering project must not claim no projects tracked, got:\n%s", got)
 	}
 }
 
