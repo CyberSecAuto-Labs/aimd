@@ -65,7 +65,7 @@ func RunSync(storeDir, machineName string, all, dryRun bool, out io.Writer) erro
 	}
 
 	displayName := filepath.Base(proj.Root)
-	return syncProject(storeDir, proj.Key, displayName, projEntry, machineName, proj.Root, registryPath, reg, dryRun, out)
+	return syncProject(storeDir, proj.Key, displayName, projEntry, machineName, proj.Root, registryPath, dryRun, out)
 }
 
 // runSyncAll iterates all registered projects and syncs each one for which this
@@ -89,7 +89,7 @@ func runSyncAll(storeDir, machineName, registryPath string, reg *registry.Regist
 			displayName = filepath.Base(machineEntry.LocalPath)
 		}
 
-		if err := syncProject(storeDir, key, displayName, projEntry, machineName, machineEntry.LocalPath, registryPath, reg, dryRun, out); err != nil {
+		if err := syncProject(storeDir, key, displayName, projEntry, machineName, machineEntry.LocalPath, registryPath, dryRun, out); err != nil {
 			_, _ = fmt.Fprintf(out, "error syncing %q: %v\n", key, err)
 			lastErr = err
 		}
@@ -98,11 +98,14 @@ func runSyncAll(storeDir, machineName, registryPath string, reg *registry.Regist
 }
 
 // syncProject performs the sync state-machine for a single project.
+//
+// projEntry is the caller's view of the project; it is only a fallback. After
+// store.Sync, syncProject reloads the registry from disk and prefers the fresh
+// project entry, so a long-lived caller (watch) cannot persist a stale snapshot.
 func syncProject(
 	storeDir, projectKey, displayName string,
 	projEntry *registry.Project,
 	machineName, localPath, registryPath string,
-	reg *registry.Registry,
 	dryRun bool,
 	out io.Writer,
 ) error {
@@ -126,6 +129,19 @@ func syncProject(
 	}
 	if err != nil {
 		return fmt.Errorf("syncing store: %w", err)
+	}
+
+	// store.Sync may have fast-forwarded remote commits onto disk (BEHIND),
+	// including a registry.json another machine changed. Reload so a later
+	// persistChange merges this machine's update onto the latest registry instead
+	// of clobbering remote track/untracks with the pre-sync snapshot the caller
+	// handed us. Reloading is a no-op for UP_TO_DATE/AHEAD.
+	reg, err := registry.LoadOrNew(registryPath)
+	if err != nil {
+		return fmt.Errorf("reloading registry after sync: %w", err)
+	}
+	if reloaded := reg.Projects[projectKey]; reloaded != nil {
+		projEntry = reloaded
 	}
 
 	// Step 2: A dirty overlay must always be committed and pushed, regardless of
