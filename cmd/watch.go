@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
+	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 	"github.com/CyberSecAuto-Labs/aimd/internal/watcher"
 )
 
@@ -86,26 +87,35 @@ func RunWatch(ctx context.Context, storeDir, machineName string, debounceSecs in
 	// goroutines, but every project pushes to the single shared store, so a mutex
 	// funnels concurrent commits/pushes into one at-a-time sequence.
 	var syncMu sync.Mutex
-	onSync := func(key string) {
+	// syncOne runs one serialized project sync, prints the live-log lines, and
+	// returns the error so callers that need it (the shutdown sweep) can surface a
+	// failure as the command result. The live debounce path discards the error
+	// after logging because the watcher stays alive and retries on the next event.
+	syncOne := func(key string) error {
 		syncMu.Lock()
 		defer syncMu.Unlock()
 
 		target, ok := byKey[key]
 		if !ok {
-			return
+			return nil
 		}
 		proj := reg.Projects[key]
 		if proj == nil {
-			return
+			return nil
 		}
 		name := proj.DisplayName
 		if name == "" {
 			name = filepath.Base(target.root)
 		}
 		_, _ = fmt.Fprintf(out, "[%s] ↑ syncing %s...\n", time.Now().Format("15:04:05"), name)
-		if serr := syncProject(storeDir, key, name, proj, machineName, target.root, registryPath, reg, dryRun, out); serr != nil {
+		if serr := syncProject(storeDir, key, name, proj, machineName, target.root, registryPath, dryRun, out); serr != nil {
 			_, _ = fmt.Fprintf(out, "[%s] error syncing %s: %v\n", time.Now().Format("15:04:05"), name, serr)
+			return serr
 		}
+		return nil
+	}
+	onSync := func(key string) {
+		_ = syncOne(key)
 	}
 
 	onChange := func(e watcher.Event) {
@@ -153,9 +163,35 @@ func RunWatch(ctx context.Context, storeDir, machineName string, debounceSecs in
 	defer stop()
 
 	runErr := w.Run(sigCtx)
+
+	// Final dirty sweep on shutdown. w.Run's flush only covers projects with a
+	// pending debounce timer; a file written just before Ctrl-C can have its
+	// fsnotify event still queued (never debounced) when ctx cancellation wins
+	// Run's select. Sweep every watched project so any dirty overlay is synced
+	// before exit. Projects the flush already synced are clean here and skipped.
+	//
+	// Unlike the live path, shutdown has no retry: surface dirty-check and sync
+	// failures as the command result so a non-zero exit honestly reflects that the
+	// promised shutdown sync did not complete.
+	var sweepErr error
+	for key := range contributing {
+		dirty, derr := store.OverlayProjectDirty(storeDir, key)
+		if derr != nil {
+			_, _ = fmt.Fprintf(out, "[%s] error checking %s: %v\n", time.Now().Format("15:04:05"), key, derr)
+			sweepErr = errors.Join(sweepErr, derr)
+			continue
+		}
+		if !dirty {
+			continue
+		}
+		if serr := syncOne(key); serr != nil {
+			sweepErr = errors.Join(sweepErr, serr)
+		}
+	}
+
 	closeErr := w.Close()
 	_, _ = fmt.Fprintln(out, "aimd watch stopped")
-	return errors.Join(runErr, closeErr)
+	return errors.Join(runErr, sweepErr, closeErr)
 }
 
 // collectOverlays builds the set of watchable overlay files keyed by their

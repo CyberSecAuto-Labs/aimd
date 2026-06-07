@@ -122,6 +122,47 @@ func seedRegistry(t *testing.T, storeDir, projectKey, localPath string, trackedF
 	}
 }
 
+// readRegistry loads and unmarshals a registry.json from path.
+func readRegistry(t *testing.T, path string) *registry.Registry {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // test-controlled path
+	if err != nil {
+		t.Fatalf("read registry %s: %v", path, err)
+	}
+	var reg registry.Registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatalf("unmarshal registry: %v", err)
+	}
+	return &reg
+}
+
+// addRegistryProject loads the registry in storeDir, adds a minimal project
+// entry under projectKey for the given machine, and writes it back. It models a
+// remote machine recording a registry-only change.
+func addRegistryProject(t *testing.T, storeDir, projectKey, machineName string) {
+	t.Helper()
+	path := filepath.Join(storeDir, ".aimd", "registry.json")
+	reg := readRegistry(t, path)
+	if reg.Projects == nil {
+		reg.Projects = map[string]*registry.Project{}
+	}
+	reg.Projects[projectKey] = &registry.Project{
+		DisplayName: projectKey,
+		Machines: map[string]*registry.Machine{
+			machineName: {LocalPath: filepath.Join("/tmp", projectKey), LastSeen: time.Now().UTC()},
+		},
+		Tracked: []registry.TrackedFile{},
+	}
+	data, err := json.MarshalIndent(reg, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal registry: %v", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 func TestSyncCmdUpToDate(t *testing.T) {
@@ -350,6 +391,78 @@ func TestSyncCmdAll_AheadCommitsRegistryAndLeavesCleanTree(t *testing.T) {
 	}
 
 	_ = bareDir
+}
+
+// A long-lived watch, or even a single sync, loads the registry before
+// store.Sync runs. store.Sync may fast-forward (BEHIND) or rebase (DIVERGED)
+// remote commits onto disk, including a registry.json that another machine
+// changed. When a dirty overlay then triggers persistChange, the in-memory
+// (pre-sync) registry snapshot must NOT clobber that pulled remote change.
+// Regression test for Finding 1: the saved registry must contain both the
+// remote machine's registry change and this machine's overlay persistence.
+func TestSyncCmdAll_BehindPreservesRemoteRegistryChange(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Machine A: seed registry + overlay, commit and push so HEAD == origin.
+	reposDir := filepath.Join(cloneDir, "repos", "myproj")
+	if err := os.MkdirAll(reposDir, 0o755); err != nil {
+		t.Fatalf("mkdir repos: %v", err)
+	}
+	overlayFile := filepath.Join(reposDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "myproj", localPath, []string{"CLAUDE.md"})
+	syncGitRun(t, cloneDir, "add", "-A")
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Machine B: clone, add a NEW project to registry.json, commit and push.
+	// This is a registry-only remote change that machine A has not seen.
+	pusherDir := t.TempDir()
+	if cloneOut, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, cloneOut)
+	}
+	syncGitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	syncGitRun(t, pusherDir, "config", "user.name", "test")
+	addRegistryProject(t, pusherDir, "remote-proj", "machine-b")
+	syncGitRun(t, pusherDir, "add", filepath.Join(".aimd", "registry.json"))
+	syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "machine B adds remote-proj")
+	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	// Machine A: dirty the overlay without committing → StateBehind + dirty overlay.
+	if err := os.WriteFile(overlayFile, []byte("# updated by A\n"), 0o644); err != nil {
+		t.Fatalf("update overlay: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := cmd.RunSync(cloneDir, "test-machine", true, false, &out); err != nil {
+		t.Fatalf("RunSync: %v", err)
+	}
+	if !strings.Contains(out.String(), "Synced") {
+		t.Fatalf("expected dirty overlay to be Synced, got:\n%s", out.String())
+	}
+
+	// The registry on disk after sync must contain BOTH projects.
+	reg := readRegistry(t, filepath.Join(cloneDir, ".aimd", "registry.json"))
+	if reg.Projects["myproj"] == nil {
+		t.Error("registry lost local project myproj after sync")
+	}
+	if reg.Projects["remote-proj"] == nil {
+		t.Error("registry clobbered machine B's remote-proj — stale snapshot overwrote pulled change")
+	}
+
+	// The committed registry pushed to origin must also contain both projects.
+	committed := syncGitRun(t, cloneDir, "show", "HEAD:.aimd/registry.json")
+	if !strings.Contains(committed, "remote-proj") {
+		t.Errorf("committed registry dropped remote-proj:\n%s", committed)
+	}
+	if !strings.Contains(committed, "myproj") {
+		t.Errorf("committed registry dropped myproj:\n%s", committed)
+	}
 }
 
 func TestSyncCmdAll_Diverged(t *testing.T) {

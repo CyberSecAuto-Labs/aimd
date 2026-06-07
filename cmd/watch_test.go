@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -181,6 +182,182 @@ func TestRunWatch_FlushSyncsDirtyOverlayOnShutdown(t *testing.T) {
 	bareLog := syncGitRun(t, bareDir, "log", "--oneline", "main")
 	if !strings.Contains(bareLog, "sync:") {
 		t.Errorf("expected 'sync:' commit pushed to origin, got:\n%s", bareLog)
+	}
+}
+
+// A file written immediately before Ctrl-C can have its fsnotify event still
+// queued when ctx cancellation wins Run's select, so the debounce flush sees no
+// pending key. Graceful shutdown must still sync the dirty overlay. This test
+// makes the overlay dirty BEFORE the watcher registers, so no fsnotify event is
+// ever generated during the session — the only path that can sync it on exit is
+// a command-level dirty sweep. Regression test for Finding 2.
+func TestRunWatch_ShutdownSyncsDirtyOverlayWithNoPendingEvent(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Commit + push an initial overlay so HEAD == origin/main.
+	overlayDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	overlayFile := filepath.Join(overlayDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	// Dirty the overlay BEFORE starting watch: no fsnotify event is generated for
+	// this write during the session, so the debouncer will have no pending key.
+	if err := os.WriteFile(overlayFile, []byte("# updated before watch\n"), 0o600); err != nil {
+		t.Fatalf("update overlay: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var out bytes.Buffer
+	// Large debounce; no timer ever fires. The file is never touched again.
+	done := runWatchAsync(ctx, cloneDir, "test-machine", 600, true, &out, &mu)
+
+	// Let the watcher register and enter Run — but do NOT touch the file again.
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	if err := waitWatch(t, done); err != nil {
+		t.Fatalf("RunWatch returned error: %v", err)
+	}
+
+	mu.Lock()
+	got := out.String()
+	mu.Unlock()
+	if !strings.Contains(got, "Synced") {
+		t.Errorf("expected dirty overlay synced on shutdown, got:\n%s", got)
+	}
+
+	// The sync commit must reach the bare origin.
+	bareLog := syncGitRun(t, bareDir, "log", "--oneline", "main")
+	if !strings.Contains(bareLog, "sync:") {
+		t.Errorf("expected 'sync:' commit pushed to origin on shutdown, got:\n%s", bareLog)
+	}
+}
+
+// The shutdown dirty sweep must not sync a project whose overlay is clean. A
+// clean shutdown should leave origin untouched and print no sync line.
+func TestRunWatch_ShutdownDoesNotSyncCleanOverlay(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	overlayDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	overlayFile := filepath.Join(overlayDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	// Commit + push so the overlay is clean and HEAD == origin/main.
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	originBefore := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var out bytes.Buffer
+	done := runWatchAsync(ctx, cloneDir, "test-machine", 600, true, &out, &mu)
+
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	if err := waitWatch(t, done); err != nil {
+		t.Fatalf("RunWatch returned error: %v", err)
+	}
+
+	mu.Lock()
+	got := out.String()
+	mu.Unlock()
+	if strings.Contains(got, "↑ syncing") {
+		t.Errorf("clean overlay should not be synced on shutdown, got:\n%s", got)
+	}
+
+	originAfter := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main"))
+	if originBefore != originAfter {
+		t.Errorf("origin advanced on clean shutdown: %s → %s", originBefore, originAfter)
+	}
+}
+
+// When the shutdown dirty sweep cannot sync a dirty project, RunWatch must
+// surface that as a non-nil command result rather than logging it and exiting 0
+// — there is no retry path on exit. A DIVERGED store with a dirty worktree makes
+// store.Sync's `git pull --rebase` refuse, so syncProject fails. Regression test
+// for Finding 3.
+func TestRunWatch_ShutdownSyncFailureReturnsError(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Commit + push an initial overlay so HEAD == origin/main.
+	overlayDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	overlayFile := filepath.Join(overlayDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	// Machine B pushes an unrelated commit so cloneDir is BEHIND by one.
+	pusherDir := t.TempDir()
+	if cloneOut, err := exec.Command("git", "clone", bareDir, pusherDir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone pusher: %v — %s", err, cloneOut)
+	}
+	syncGitRun(t, pusherDir, "config", "user.email", "test@test.com")
+	syncGitRun(t, pusherDir, "config", "user.name", "test")
+	syncAddCommitFile(t, pusherDir, "remote.txt", "from B")
+	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
+
+	// cloneDir gets a local commit too → DIVERGED (1 ahead, 1 behind).
+	syncAddCommitFile(t, cloneDir, "local.txt", "from A")
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	// Dirty the overlay before the watcher registers (no event → only the sweep
+	// can act). With a DIVERGED store, store.Sync's rebase refuses on the dirty
+	// worktree, so the shutdown sync fails.
+	if err := os.WriteFile(overlayFile, []byte("# updated before watch\n"), 0o600); err != nil {
+		t.Fatalf("update overlay: %v", err)
+	}
+
+	originBefore := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var out bytes.Buffer
+	done := runWatchAsync(ctx, cloneDir, "test-machine", 600, true, &out, &mu)
+
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	err := waitWatch(t, done)
+	if err == nil {
+		t.Fatalf("expected RunWatch to return an error when the shutdown sync fails, got nil")
+	}
+
+	// Origin must not have advanced — the failed sync pushed nothing.
+	originAfter := strings.TrimSpace(syncGitRun(t, bareDir, "rev-parse", "main"))
+	if originBefore != originAfter {
+		t.Errorf("origin advanced despite failed shutdown sync: %s → %s", originBefore, originAfter)
 	}
 }
 
