@@ -48,9 +48,26 @@ func healthyProject(t *testing.T) (projectDir, storeDir string) {
 	return projectDir, storeDir
 }
 
+// wireReachableOrigin gives storeDir a reachable bare origin with main published,
+// so doctor's reachability probe (`git fetch --dry-run origin main`) succeeds.
+func wireReachableOrigin(t *testing.T, storeDir string) {
+	t.Helper()
+	bareDir := filepath.Join(t.TempDir(), "origin.git")
+	if out, err := exec.Command("git", "init", "--bare", bareDir).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	runGit(t, [][]string{
+		{"git", "-C", storeDir, "remote", "add", "origin", bareDir},
+		{"git", "-C", storeDir, "push", "origin", "HEAD:main"},
+	})
+}
+
 func TestRunDoctor_Healthy(t *testing.T) {
 	// Not parallel — uses os.Chdir.
 	projectDir, storeDir := healthyProject(t)
+	// A fully healthy run requires a reachable remote too — otherwise the
+	// reachability probe warns and the summary is "warning found", not all-clear.
+	wireReachableOrigin(t, storeDir)
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
@@ -61,8 +78,37 @@ func TestRunDoctor_Healthy(t *testing.T) {
 	if !strings.Contains(got, "✓ CLAUDE.md") {
 		t.Errorf("expected a passing CLAUDE.md row, got:\n%s", got)
 	}
+	if !strings.Contains(got, "✓ remote reachable") {
+		t.Errorf("expected a passing reachability row, got:\n%s", got)
+	}
 	if !strings.Contains(got, "All checks passed") {
 		t.Errorf("expected the all-clear summary, got:\n%s", got)
+	}
+}
+
+// TestRunDoctor_OfflineWarningSummary proves a warning (unreachable remote) is
+// not summarized as an all-clear: the run stays exit-0 (offline is non-fatal)
+// but the summary must report the warning rather than "All checks passed".
+func TestRunDoctor_OfflineWarningSummary(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+	// healthyProject's store has no origin remote, so the reachability check
+	// warns while every file check passes — exactly the contradictory case.
+	projectDir, storeDir := healthyProject(t)
+	chdir(t, projectDir)
+
+	var out bytes.Buffer
+	if err := cmd.RunDoctor(storeDir, "this-machine", false, &out); err != nil {
+		t.Fatalf("RunDoctor with a warning but no failures should return nil: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "⚠ remote reachable") {
+		t.Errorf("expected the reachability warning, got:\n%s", got)
+	}
+	if strings.Contains(got, "All checks passed") {
+		t.Errorf("a warning must not be summarized as all-clear, got:\n%s", got)
+	}
+	if !strings.Contains(got, "1 warning") {
+		t.Errorf("expected a warning summary line, got:\n%s", got)
 	}
 }
 

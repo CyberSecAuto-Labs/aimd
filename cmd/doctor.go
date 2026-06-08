@@ -94,11 +94,13 @@ func RunDoctor(storeDir, machineName string, all bool, out io.Writer) error {
 		return fmt.Errorf("link mode: %w", err)
 	}
 
-	var failures int
+	var failures, warnings int
 
 	// Store-level checks (run once, regardless of scope).
 	_, _ = fmt.Fprintln(out, "Store")
-	failures += reportCheck(out, doctorReachable(storeDir))
+	f, w := reportCheck(out, doctorReachable(storeDir))
+	failures += f
+	warnings += w
 
 	// Per-project file checks.
 	targets, err := selectProjects(reg, machineName, all)
@@ -112,16 +114,26 @@ func RunDoctor(storeDir, machineName string, all bool, out io.Writer) error {
 	}
 
 	for _, t := range targets {
-		failures += doctorProject(out, storeDir, reg.Projects[t.key], t.key, t.root, linkMode)
+		pf, pw := doctorProject(out, storeDir, reg.Projects[t.key], t.key, t.root, linkMode)
+		failures += pf
+		warnings += pw
 	}
 
 	_, _ = fmt.Fprintln(out)
-	if failures == 0 {
+	switch {
+	case failures > 0:
+		_, _ = fmt.Fprintf(out, "✗ %s found. Run the suggested fix commands above.\n", pluralize(failures, "problem"))
+		return errDoctorProblems
+	case warnings > 0:
+		// Warnings (e.g. an unreachable remote while offline) are surfaced but do
+		// not gate: the exit stays 0 while the summary honestly reflects them
+		// rather than claiming an all-clear.
+		_, _ = fmt.Fprintf(out, "⚠ %s found; no blocking problems.\n", pluralize(warnings, "warning"))
+		return nil
+	default:
 		_, _ = fmt.Fprintf(out, "✓ All checks passed.\n")
 		return nil
 	}
-	_, _ = fmt.Fprintf(out, "✗ %s found. Run the suggested fix commands above.\n", pluralizeProblems(failures))
-	return errDoctorProblems
 }
 
 // checkResult is one line of doctor output: a status, the thing being checked,
@@ -133,9 +145,11 @@ type checkResult struct {
 	fix    string // suggested command (empty for OK / warn without an action)
 }
 
-// reportCheck prints one result and returns 1 if it is a failure, else 0.
-// Warnings are surfaced but do not count toward the non-zero exit.
-func reportCheck(out io.Writer, r checkResult) int {
+// reportCheck prints one result and returns its contribution to the failure and
+// warning tallies: (1,0) for a hard failure, (0,1) for a warning, (0,0) for OK.
+// Only failures gate the exit; warnings are surfaced so the summary can report
+// them without claiming an all-clear.
+func reportCheck(out io.Writer, r checkResult) (failures, warnings int) {
 	line := fmt.Sprintf("  %s %s", r.status.icon(), r.label)
 	if r.detail != "" {
 		line += " — " + r.detail
@@ -144,10 +158,14 @@ func reportCheck(out io.Writer, r checkResult) int {
 		line += " → " + r.fix
 	}
 	_, _ = fmt.Fprintln(out, line)
-	if r.status == checkFail {
-		return 1
+	switch r.status {
+	case checkFail:
+		return 1, 0
+	case checkWarn:
+		return 0, 1
+	default:
+		return 0, 0
 	}
-	return 0
 }
 
 // doctorReachable probes the store's origin remote. An unreachable remote is a
@@ -165,14 +183,14 @@ func doctorReachable(storeDir string) checkResult {
 	return checkResult{status: checkOK, label: "remote reachable"}
 }
 
-// doctorProject runs the per-file checks for one project and returns the number
-// of failures. When root is empty (the project is registered but not checked
-// out on this machine) the symlink and exclude checks are skipped with a note,
-// since there is no working tree to inspect; the store-consistency check still
-// runs.
-func doctorProject(out io.Writer, storeDir string, proj *registry.Project, key, root string, linkMode link.LinkMode) int {
+// doctorProject runs the per-file checks for one project and returns its failure
+// and warning tallies. When root is empty (the project is registered but not
+// checked out on this machine) the symlink and exclude checks are skipped with a
+// note, since there is no working tree to inspect; the store-consistency check
+// still runs.
+func doctorProject(out io.Writer, storeDir string, proj *registry.Project, key, root string, linkMode link.LinkMode) (failures, warnings int) {
 	if proj == nil {
-		return 0
+		return 0, 0
 	}
 
 	name := proj.DisplayName
@@ -184,7 +202,7 @@ func doctorProject(out io.Writer, storeDir string, proj *registry.Project, key, 
 
 	if len(proj.Tracked) == 0 {
 		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", name)
-		return 0
+		return 0, 0
 	}
 
 	checkedOut := root != ""
@@ -192,13 +210,14 @@ func doctorProject(out io.Writer, storeDir string, proj *registry.Project, key, 
 		_, _ = fmt.Fprintf(out, "  (not checked out on this machine — symlink and exclude checks skipped)\n")
 	}
 
-	var failures int
 	for _, tf := range proj.Tracked {
 		for _, r := range doctorFileChecks(storeDir, key, root, tf.Path, linkMode, checkedOut) {
-			failures += reportCheck(out, r)
+			f, w := reportCheck(out, r)
+			failures += f
+			warnings += w
 		}
 	}
-	return failures
+	return failures, warnings
 }
 
 // doctorFileChecks returns the ordered check results for a single tracked file:
@@ -269,12 +288,13 @@ func symlinkResolves(projectDst, overlaySrc string, linkMode link.LinkMode) bool
 	return verr == nil && ok
 }
 
-// pluralizeProblems renders "1 problem" / "N problems".
-func pluralizeProblems(n int) string {
+// pluralize renders a count with its noun, adding a trailing "s" for any count
+// other than one (e.g. "1 problem", "2 problems", "1 warning").
+func pluralize(n int, noun string) string {
 	if n == 1 {
-		return "1 problem"
+		return "1 " + noun
 	}
-	return fmt.Sprintf("%d problems", n)
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func init() {
