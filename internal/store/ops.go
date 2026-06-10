@@ -97,23 +97,45 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		verb, filepath.Base(projectRoot), machineName,
 		time.Now().UTC().Format(time.RFC3339))
 
-	var msg string
+	var sb strings.Builder
+	sb.WriteString(title)
+
+	// Human-readable body: the affected files, kept for anyone reading the store
+	// with `git log` directly.
 	if len(files) > 0 {
-		label := verbLabel(verb)
-		var sb strings.Builder
-		sb.WriteString(title)
 		sb.WriteString("\n\n")
-		sb.WriteString(label)
+		sb.WriteString(verbLabel(verb))
 		sb.WriteString(" files:\n")
 		for _, f := range files {
 			sb.WriteString("  ")
 			sb.WriteString(f)
 			sb.WriteString("\n")
 		}
-		msg = sb.String()
+		// One more newline to leave a blank line before the trailer block.
+		sb.WriteString("\n")
 	} else {
-		msg = title
+		// Blank line separating the subject from the trailer block.
+		sb.WriteString("\n\n")
 	}
+
+	// Machine-readable trailers (D22): `aimd log` sources its structured fields
+	// (verb, project, machine, files) from these, never by parsing the human
+	// subject/body. The trailer block must be the final paragraph for git's
+	// trailer parser to recognise it.
+	sb.WriteString("Aimd-Verb: ")
+	sb.WriteString(verb)
+	sb.WriteString("\nAimd-Project: ")
+	sb.WriteString(projectKey)
+	sb.WriteString("\nAimd-Machine: ")
+	sb.WriteString(machineName)
+	sb.WriteString("\n")
+	for _, f := range files {
+		sb.WriteString("Aimd-File: ")
+		sb.WriteString(f)
+		sb.WriteString("\n")
+	}
+
+	msg := sb.String()
 
 	commitOut, err := gitCmd(
 		"-C", storeDir,
