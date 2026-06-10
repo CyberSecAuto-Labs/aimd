@@ -167,6 +167,19 @@ func Pull(storeDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// FetchDryRun reports whether the store's origin remote is reachable by running
+// `git fetch --dry-run origin main`. It contacts the network to negotiate with
+// the remote but writes nothing to the local repository, so it is safe to run
+// as a read-only health probe. A nil error means the remote responded; a
+// non-nil error wraps git's output (offline, auth failure, missing ref, …).
+func FetchDryRun(storeDir string) error {
+	out, err := gitCmd("-C", storeDir, "fetch", "--dry-run", "origin", "main").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git fetch --dry-run: %w — %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // revParse returns the full SHA for the given ref.
 func revParse(storeDir, ref string) (string, error) {
 	out, err := gitCmd("-C", storeDir, "rev-parse", ref).CombinedOutput()

@@ -49,6 +49,24 @@ func addCommitFile(t *testing.T, dir, filename, content string) {
 		"commit", "-m", "add "+filename)
 }
 
+// ── FetchDryRun tests ────────────────────────────────────────────────────────
+
+func TestFetchDryRunReachable(t *testing.T) {
+	_, cloneDir := setupBareWithClone(t)
+	if err := store.FetchDryRun(cloneDir); err != nil {
+		t.Errorf("FetchDryRun against a reachable origin: %v", err)
+	}
+}
+
+func TestFetchDryRunUnreachable(t *testing.T) {
+	_, cloneDir := setupBareWithClone(t)
+	// Repoint origin at a path that does not exist so the fetch fails fast.
+	gitRun(t, cloneDir, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "does-not-exist"))
+	if err := store.FetchDryRun(cloneDir); err == nil {
+		t.Error("FetchDryRun against an unreachable origin: want error, got nil")
+	}
+}
+
 // ── DetectState tests ────────────────────────────────────────────────────────
 
 func TestDetectStateUpToDate(t *testing.T) {

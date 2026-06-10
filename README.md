@@ -50,7 +50,7 @@ The core file tracking and sync engine is under development.
 | `aimd status` | ✅ implemented |
 | `aimd watch` | ✅ implemented |
 | `aimd resolve` | ✅ implemented |
-| `aimd doctor` | 🚧 not yet implemented |
+| `aimd doctor` | ✅ implemented |
 | `aimd log` | 🚧 not yet implemented |
 | `aimd remove` | 🚧 not yet implemented |
 
