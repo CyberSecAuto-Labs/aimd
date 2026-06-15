@@ -18,7 +18,7 @@ const (
 )
 
 // logFormat is the per-commit pretty-format. Structured fields come from the
-// Aimd-* trailers (D22); the subject is carried only so pre-trailer commits can
+// Aimd-* trailers; the subject is carried only so pre-trailer commits can
 // degrade to a coarse entry and so --all has a human project label.
 var logFormat = strings.Join([]string{
 	"%H",
@@ -49,7 +49,7 @@ type LogEntry struct {
 }
 
 // Log returns the store's overlay-change history, most recent first. Structured
-// fields are read from git trailers (D22), with a coarse subject parse as the
+// fields are read from git trailers, with a coarse subject parse as the
 // fallback for pre-trailer commits. Non-aimd commits (the initial scaffold
 // commit, merges, hand-made commits) are skipped.
 func Log(storeDir string) ([]LogEntry, error) {

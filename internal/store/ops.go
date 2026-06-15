@@ -118,7 +118,7 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		sb.WriteString("\n\n")
 	}
 
-	// Machine-readable trailers (D22): `aimd log` sources its structured fields
+	// Machine-readable trailers: `aimd log` sources its structured fields
 	// (verb, project, machine, files) from these, never by parsing the human
 	// subject/body. The trailer block must be the final paragraph for git's
 	// trailer parser to recognise it.
