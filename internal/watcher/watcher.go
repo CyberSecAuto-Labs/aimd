@@ -99,7 +99,7 @@ func (w *Watcher) Add(path, projectKey string) error {
 //
 // When ctx is cancelled, Run FLUSHES the debouncer — running OnSync once for
 // every project with a pending change — before returning. This is the
-// "flush pending timers before exit" mechanism: cmd/watch (Step 16) derives ctx
+// "flush pending timers before exit" mechanism: cmd/watch derives ctx
 // from signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM), so SIGINT/SIGTERM
 // cancel ctx and thereby trigger the flush. This package stays signal-agnostic.
 func (w *Watcher) Run(ctx context.Context) error {
