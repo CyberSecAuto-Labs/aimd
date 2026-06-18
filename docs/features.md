@@ -1,0 +1,254 @@
+# aimd Features
+
+Reference documentation for each `aimd` command. Content mirrors the built-in
+`aimd <command> --help` output.
+
+Global flags available on every command: `--store` (store path, default
+`~/.aimd/store`), `--machine` (machine name override, default system hostname),
+`--dry-run` (show what would happen without making changes), and `--verbose`/`-v`.
+
+---
+
+## aimd init
+
+Initialise the aimd store.
+
+Clone an existing aimd store or create a new one at `~/.aimd/store/`.
+
+If `<store-url>` is not provided, you will be prompted to enter a Git remote URL.
+
+For a new (empty) remote, aimd will initialise a local store, scaffold the
+registry, make an initial commit, and push to the remote.
+
+```
+aimd init [<store-url>]
+```
+
+| Flag | Description |
+|---|---|
+| `--yes`, `-y` | Skip all confirmation prompts |
+
+## aimd track
+
+Start tracking a file or directory in the private store.
+
+Copy a file (or all files in a directory) into the private aimd store, replace
+it with a symlink, and hide it from `git status` via `.git/info/exclude`.
+
+Multiple paths may be given. Directories are walked recursively.
+
+```
+aimd track <path> [<path>...]
+```
+
+## aimd untrack
+
+Stop tracking a file and optionally restore or delete it.
+
+By default (`--restore`), the file is copied back from the store to the project
+directory, the symlink is removed, and the overlay is deleted from the store.
+
+With `--delete`, both the symlink and the overlay are deleted without restoring
+file content. Use this flag carefully — content will be lost.
+
+In both modes aimd prints what will happen and requires `--yes` to skip the
+interactive confirmation prompt.
+
+```
+aimd untrack <path> [<path>...]
+```
+
+| Flag | Description |
+|---|---|
+| `--delete` | Remove symlink and overlay only (no restore); content will be lost |
+| `--yes` | Skip confirmation prompt |
+
+## aimd sync
+
+Sync tracked files with the private store.
+
+Sync the private aimd store with the remote origin.
+
+By default, aimd syncs only the current project (detected from the working
+directory). Use `--all` to sync all registered projects for this machine.
+
+Sync handles four states:
+
+| State | Behaviour |
+|---|---|
+| `UP_TO_DATE` | nothing to do, reports "store up to date" |
+| `BEHIND` | fast-forward pull from origin |
+| `AHEAD` | commits staged overlay changes and pushes |
+| `DIVERGED` | rebases local commits on top of origin, then pushes (if clean) |
+| `CONFLICT` | prints conflicted files and instructs user to resolve |
+
+```
+aimd sync
+```
+
+| Flag | Description |
+|---|---|
+| `--all` | Sync all registered projects |
+
+## aimd restore
+
+Restore tracked files as symlinks in the current project.
+
+Pull the latest store state, then re-create symlinks for every tracked file
+that belongs to the current project.
+
+By default restore warns and skips any destination that is an existing real
+file. Use `--force` to replace real files with store overlays.
+
+```
+aimd restore
+```
+
+| Flag | Description |
+|---|---|
+| `--force` | Replace existing real files with store overlays |
+
+## aimd status
+
+Show the sync state of tracked AI context files.
+
+Inspect tracked files and the store without modifying anything.
+
+By default status reports the current project only. Use `--all` to report every
+tracked project. Use `--all-machines` to also list the other machines tracking
+each reported project. status is read-only and offline by default: it compares
+the store against the last-fetched `origin/main` without contacting the remote.
+Pass `--fetch` to refresh the remote-tracking ref first.
+
+```
+aimd status
+```
+
+| Flag | Description |
+|---|---|
+| `--all` | Report every tracked project, not just the current one |
+| `--all-machines` | List the other machines tracking each reported project |
+| `--fetch` | Fetch `origin/main` before reporting store sync state |
+
+## aimd watch
+
+Watch tracked files and sync after a quiet period.
+
+Watch tracked AI context files and automatically sync each project to the
+private store after a debounce window elapses.
+
+By default watch follows only the current project (detected from the working
+directory). Use `--all` to watch every registered project. Each change resets
+that project's debounce timer; once the quiet period passes the project is
+synced.
+
+Press Ctrl-C to stop — any project with pending changes is synced before exit.
+
+```
+aimd watch
+```
+
+| Flag | Description |
+|---|---|
+| `--all` | Watch all registered projects, not just the current one |
+| `--debounce` | Quiet period in seconds before syncing after a change (default 300) |
+
+## aimd resolve
+
+Resolve a sync conflict in the private store.
+
+Resolve a rebase conflict left behind by a failed `aimd sync`.
+
+When aimd sync rebases local store commits onto origin and a tracked overlay was
+edited on two machines, the rebase stops with conflicts. aimd resolve drives the
+resolution to completion and pushes the result.
+
+Pass the conflicted file path exactly as aimd sync printed it (relative to the
+store, e.g. `repos/<project-key>/CLAUDE.md`):
+
+```
+aimd resolve repos/github.com~org~app/CLAUDE.md
+```
+
+By default the file is opened in `$EDITOR` (or `$VISUAL`); after the editor
+closes aimd verifies no conflict markers remain, then runs `git rebase
+--continue` and pushes. With no editor configured, aimd prints the path and
+instructions and you re-run the same command once the markers are gone.
+
+| Flag | Description |
+|---|---|
+| `--keep-local` | Keep your version of the file — the local commit being replayed (`git checkout --theirs`) |
+| `--keep-remote` | Keep the remote version — `origin/main`, which the rebase replays onto (`git checkout --ours`) |
+| `--abort` | Abort the rebase and restore the store to its pre-sync state |
+
+## aimd doctor
+
+Diagnose the health of the store and tracked files.
+
+Run a series of read-only health checks and report each one with a clear
+✓ / ⚠ / ✗ status plus a suggested fix command for every failure.
+
+Checks performed:
+
+- store remote reachable (`git fetch --dry-run`)
+- every tracked symlink resolves to its overlay
+- every tracked file has a `.git/info/exclude` entry
+- registry and store agree (each tracked file exists in the store)
+
+By default doctor inspects the current project. Use `--all` to check every
+tracked project. doctor never modifies anything; it exits non-zero when any
+check fails so it can gate scripts and CI.
+
+```
+aimd doctor
+```
+
+| Flag | Description |
+|---|---|
+| `--all` | Check every tracked project, not just the current one |
+
+## aimd log
+
+Show the history of store changes for tracked files.
+
+List past store changes — what verb ran, which files it touched, on which
+machine, and how long ago.
+
+By default log reports the current project only. Use `--all` to report history
+across every registered project, and `--limit` to cap the number of entries.
+
+log is read-only and offline: it reads structured fields from git trailers in
+the store's commit history, never from the human-readable subject line.
+
+```
+aimd log
+```
+
+| Flag | Description |
+|---|---|
+| `--all` | Show history across all registered projects |
+| `--limit` | Maximum number of entries to show, `0` = no limit (default 20) |
+
+## aimd remove
+
+Forget a project entirely — drop it from the store and registry.
+
+Remove a project from aimd: drop its registry entry and delete its overlays
+(`repos/<key>/`) and metadata from the store. This never touches the project's
+working tree — it only cleans up aimd's own bookkeeping.
+
+Unlike untrack (which is per-file), remove forgets the whole project. With no
+argument it targets the current project; pass a project key or display name to
+forget a project that is not checked out on this machine.
+
+A project that still has tracked files is refused unless `--force`. remove
+prints what it will do and requires `--yes` to skip the confirmation prompt.
+
+```
+aimd remove [<project>]
+```
+
+| Flag | Description |
+|---|---|
+| `--force` | Remove even if the project still has tracked files |
+| `--yes` | Skip confirmation prompt |
