@@ -124,11 +124,24 @@ func TestCommitNoBody(t *testing.T) {
 		t.Fatalf("store.Commit: %v", err)
 	}
 
-	// Full commit message should be just the title — no blank line + body.
-	logOut := strings.TrimSpace(gitRun(t, storeDir, "log", "--format=%B", "-1"))
-	lines := strings.Split(logOut, "\n")
-	if len(lines) > 1 {
-		t.Errorf("expected single-line commit message, got %d lines: %q", len(lines), logOut)
+	// With no files there is no human-readable "files:" body, but the machine
+	// trailers are always emitted.
+	body := gitRun(t, storeDir, "log", "--format=%B", "-1")
+	if strings.Contains(body, "files:") {
+		t.Errorf("expected no file-list body for a no-files commit, got: %q", body)
+	}
+
+	// The subject (first line) must still be the bare title.
+	subject := strings.TrimSpace(gitRun(t, storeDir, "log", "--format=%s", "-1"))
+	if strings.Contains(subject, "\n") || !strings.HasPrefix(subject, "track: proj [machine ") {
+		t.Errorf("unexpected subject: %q", subject)
+	}
+
+	// Trailers must be present and machine-extractable.
+	verb := strings.TrimSpace(gitRun(t, storeDir, "log", "-1",
+		"--format=%(trailers:key=Aimd-Verb,valueonly)"))
+	if verb != "track" {
+		t.Errorf("Aimd-Verb trailer = %q, want %q", verb, "track")
 	}
 }
 

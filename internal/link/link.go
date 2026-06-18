@@ -12,9 +12,9 @@ type LinkMode string //nolint:revive // "link.LinkMode" is the intentional publi
 const (
 	// LinkModeSymlink uses OS symbolic links — the default for v1.
 	LinkModeSymlink LinkMode = "symlink"
-	// LinkModeHardlink uses hard links — planned for Phase 2.
+	// LinkModeHardlink uses hard links — not yet implemented.
 	LinkModeHardlink LinkMode = "hardlink"
-	// LinkModeCopy copies files — planned for Phase 2 (containers, Codespaces).
+	// LinkModeCopy copies files — not yet implemented (containers, Codespaces).
 	LinkModeCopy LinkMode = "copy"
 )
 
