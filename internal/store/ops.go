@@ -69,6 +69,7 @@ func verbLabel(verb string) string {
 		"untrack": "Untracked",
 		"restore": "Restored",
 		"sync":    "Synced",
+		"remove":  "Removed",
 	}
 	if l, ok := labels[verb]; ok {
 		return l
@@ -97,6 +98,29 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		verb, filepath.Base(projectRoot), machineName,
 		time.Now().UTC().Format(time.RFC3339))
 
+	msg := buildCommitMessage(title, verb, projectKey, machineName, files)
+
+	commitOut, err := gitCmd(
+		"-C", storeDir,
+		"-c", "user.email=aimd@localhost",
+		"-c", "user.name=aimd",
+		"-c", "commit.gpgsign=false",
+		"commit", "-m", msg,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(commitOut)))
+	}
+
+	return nil
+}
+
+// buildCommitMessage assembles a store commit message: the human-readable title,
+// an optional body listing the affected files, and the machine-readable trailer
+// block. `aimd log` sources its structured fields (verb, project, machine, files)
+// from the trailers, never by parsing the human subject/body — so the trailer
+// block must always be the final paragraph for git's trailer parser. This is the
+// single definition of that format, shared by Commit and RemoveProject.
+func buildCommitMessage(title, verb, projectKey, machineName string, files []string) string {
 	var sb strings.Builder
 	sb.WriteString(title)
 
@@ -118,10 +142,6 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		sb.WriteString("\n\n")
 	}
 
-	// Machine-readable trailers: `aimd log` sources its structured fields
-	// (verb, project, machine, files) from these, never by parsing the human
-	// subject/body. The trailer block must be the final paragraph for git's
-	// trailer parser to recognise it.
 	sb.WriteString("Aimd-Verb: ")
 	sb.WriteString(verb)
 	sb.WriteString("\nAimd-Project: ")
@@ -135,7 +155,37 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 		sb.WriteString("\n")
 	}
 
-	msg := sb.String()
+	return sb.String()
+}
+
+// RemoveProject stages the deletion of a project's overlay tree and metadata
+// file from the store, stages the (already-saved) registry change, and commits
+// with a "remove" verb + Aimd-* trailers. The caller saves registry.json and
+// pushes separately.
+//
+// --ignore-unmatch lets this succeed even for a project that was never pushed
+// (no overlay or metadata exists in the store yet) — the registry change still
+// gets committed. remove affects no individual files, so no Aimd-File trailers
+// are emitted.
+func RemoveProject(storeDir, projectKey, displayName, machineName string) error {
+	reposRel := filepath.Join("repos", projectKey)
+	metaRel := filepath.Join("metadata", projectKey+".json")
+
+	rmOut, err := gitCmd("-C", storeDir, "rm", "-r", "--ignore-unmatch", "--quiet",
+		"--", reposRel, metaRel).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git rm: %w — %s", err, strings.TrimSpace(string(rmOut)))
+	}
+
+	registryRel := filepath.Join(".aimd", "registry.json")
+	addOut, err := gitCmd("-C", storeDir, "add", registryRel).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git add: %w — %s", err, strings.TrimSpace(string(addOut)))
+	}
+
+	title := fmt.Sprintf("remove: %s [%s %s]",
+		displayName, machineName, time.Now().UTC().Format(time.RFC3339))
+	msg := buildCommitMessage(title, "remove", projectKey, machineName, nil)
 
 	commitOut, err := gitCmd(
 		"-C", storeDir,
