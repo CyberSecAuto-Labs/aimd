@@ -149,6 +149,8 @@ func logVerbLabel(verb string) string {
 		return "restored"
 	case "sync":
 		return "synced"
+	case "remove":
+		return "removed"
 	case "":
 		return "changed"
 	default:

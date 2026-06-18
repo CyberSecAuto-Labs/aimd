@@ -472,3 +472,71 @@ func TestCommitSucceedsWithGlobalGPGSigningEnabled(t *testing.T) {
 		t.Fatalf("store.Commit must succeed despite global commit.gpgsign=true: %v", err)
 	}
 }
+
+func TestRemoveProject(t *testing.T) {
+	const projectKey = "mykey"
+	storeDir, registryFile := setupStoreRepo(t, projectKey)
+
+	// Drop the project from the registry on disk (the caller does this before
+	// calling RemoveProject).
+	if err := os.WriteFile(registryFile, []byte(`{"version":1,"projects":{}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write registry.json: %v", err)
+	}
+
+	if err := store.RemoveProject(storeDir, projectKey, "myproject", "mymachine"); err != nil {
+		t.Fatalf("store.RemoveProject: %v", err)
+	}
+
+	// Overlay dir and metadata must be gone from the worktree.
+	if _, err := os.Stat(filepath.Join(storeDir, "repos", projectKey)); !os.IsNotExist(err) {
+		t.Errorf("repos/%s still present in worktree: %v", projectKey, err)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, "metadata", projectKey+".json")); !os.IsNotExist(err) {
+		t.Errorf("metadata/%s.json still present: %v", projectKey, err)
+	}
+
+	// They must also be gone from the index/tree at HEAD.
+	tree := gitRun(t, storeDir, "ls-tree", "-r", "--name-only", "HEAD")
+	if strings.Contains(tree, "repos/"+projectKey) {
+		t.Errorf("repos/%s still tracked at HEAD:\n%s", projectKey, tree)
+	}
+	if strings.Contains(tree, "metadata/"+projectKey+".json") {
+		t.Errorf("metadata/%s.json still tracked at HEAD:\n%s", projectKey, tree)
+	}
+
+	subject := strings.TrimSpace(gitRun(t, storeDir, "log", "--format=%s", "-1"))
+	if !strings.HasPrefix(subject, "remove: myproject [mymachine ") {
+		t.Errorf("HEAD subject = %q, want remove: myproject prefix", subject)
+	}
+	body := gitRun(t, storeDir, "log", "--format=%B", "-1")
+	for _, want := range []string{"Aimd-Verb: remove", "Aimd-Project: " + projectKey, "Aimd-Machine: mymachine"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("commit body missing %q; got:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Aimd-File:") {
+		t.Errorf("remove commit must not carry Aimd-File trailers; got:\n%s", body)
+	}
+}
+
+func TestRemoveProjectNeverPushed(t *testing.T) {
+	// A project with no overlay/metadata in the store must not error (the
+	// registry change still gets committed). --ignore-unmatch guarantees this.
+	const projectKey = "mykey"
+	storeDir, registryFile := setupStoreRepo(t, projectKey)
+
+	// Remove the overlay+metadata from the index first, simulating a project that
+	// was registered but never had files pushed.
+	gitRun(t, storeDir, "rm", "-r", "--quiet", "--",
+		filepath.Join("repos", projectKey), filepath.Join("metadata", projectKey+".json"))
+	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "drop overlay")
+
+	if err := os.WriteFile(registryFile, []byte(`{"version":1,"projects":{}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write registry.json: %v", err)
+	}
+
+	if err := store.RemoveProject(storeDir, projectKey, "myproject", "m"); err != nil {
+		t.Fatalf("RemoveProject on never-pushed project should succeed: %v", err)
+	}
+}
