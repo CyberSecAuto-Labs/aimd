@@ -30,13 +30,15 @@ jobs:
         uses: anchore/sbom-action@v0
         with:
           format: cyclonedx-json
-          output-file: aimd.cdx.json
+          # Write outside the repo so GoReleaser's `release --clean` does not
+          # see a dirty working tree.
+          output-file: ${{ runner.temp }}/aimd.cdx.json
 
       - name: Scan SBOM with grype
         id: scan
         uses: anchore/scan-action@v6
         with:
-          sbom: aimd.cdx.json
+          sbom: ${{ runner.temp }}/aimd.cdx.json
           fail-build: true
           severity-cutoff: high
           output-format: sarif
