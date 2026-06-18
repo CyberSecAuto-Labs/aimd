@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/CyberSecAuto-Labs/aimd/cmd"
+	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 )
 
 // statusProject describes one project to seed into a status test store.
@@ -473,11 +475,66 @@ func TestRunStatus_All_EmptyProjectShowsRemoveHint(t *testing.T) {
 	if !strings.Contains(got, "appA") {
 		t.Errorf("expected lingering project still listed, got:\n%s", got)
 	}
-	if !strings.Contains(got, "aimd remove") {
-		t.Errorf("expected `aimd remove` hint under empty project, got:\n%s", got)
+	// The hint must use the stable project key, not the display name, so it is
+	// directly runnable even when names collide across remotes.
+	if !strings.Contains(got, "aimd remove github.com~test~appA") {
+		t.Errorf("expected key-based `aimd remove` hint under empty project, got:\n%s", got)
 	}
 	if strings.Contains(got, "No projects tracked") {
 		t.Errorf("--all with a lingering project must not claim no projects tracked, got:\n%s", got)
+	}
+}
+
+// TestRunStatus_All_EmptyProjectHintKeyResolvesOnNameCollision is the step-19
+// review regression: two empty projects share the display name "app" but have
+// distinct keys. The `status --all` hint must print each project's KEY (not the
+// colliding name, which `aimd remove` rejects as ambiguous), and the printed key
+// path must remove exactly the intended project.
+func TestRunStatus_All_EmptyProjectHintKeyResolvesOnNameCollision(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const keyA, keyB = "github.com~acme~app", "github.com~other~app"
+	makeStatusStore(t, storeDir, []statusProject{
+		{key: keyA, display: "app", root: "", tracked: nil, machines: nil},
+		{key: keyB, display: "app", root: "", tracked: nil, machines: nil},
+	})
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+		t.Fatalf("RunStatus --all: %v", err)
+	}
+	got := out.String()
+
+	// Both projects' key-based hints must be present; the bare ambiguous
+	// `aimd remove app` must NOT appear.
+	for _, key := range []string{keyA, keyB} {
+		if !strings.Contains(got, "aimd remove "+key) {
+			t.Errorf("expected key-based hint `aimd remove %s`, got:\n%s", key, got)
+		}
+	}
+	if strings.Contains(got, "aimd remove app)") {
+		t.Errorf("hint used the ambiguous display name instead of the key:\n%s", got)
+	}
+
+	// The printed key path must remove exactly the intended project, leaving the
+	// other collision sibling intact.
+	if err := cmd.RunRemove([]string{keyA}, storeDir, "this-machine",
+		false, true, false, strings.NewReader(""), io.Discard); err != nil {
+		t.Fatalf("RunRemove %s: %v", keyA, err)
+	}
+	reg, err := registry.Load(filepath.Join(storeDir, ".aimd", "registry.json"))
+	if err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+	if _, ok := reg.Projects[keyA]; ok {
+		t.Errorf("project %s should have been removed", keyA)
+	}
+	if _, ok := reg.Projects[keyB]; !ok {
+		t.Errorf("collision sibling %s should remain after removing %s", keyB, keyA)
 	}
 }
 

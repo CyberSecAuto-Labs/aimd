@@ -249,9 +249,12 @@ func printProject(out io.Writer, storeDir, machineName string, proj *registry.Pr
 	_, _ = fmt.Fprintf(out, "%s\n", name)
 
 	// A lingering project whose last file was untracked: surface it (rather than
-	// dropping it silently) with a hint to forget it once `aimd remove` exists.
+	// dropping it silently) with a hint to forget it. The hint uses the project
+	// key, not the display name: names derive from the directory basename and
+	// collide across remotes (two `app` projects), which `aimd remove` rejects as
+	// ambiguous — the key is unique and always copy-pasteable.
 	if len(proj.Tracked) == 0 {
-		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", name)
+		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", key)
 		return
 	}
 

@@ -200,8 +200,10 @@ func doctorProject(out io.Writer, storeDir string, proj *registry.Project, key, 
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, name)
 
+	// Use the project key, not the display name: names collide across remotes and
+	// `aimd remove` rejects an ambiguous name, whereas the key is always unique.
 	if len(proj.Tracked) == 0 {
-		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", name)
+		_, _ = fmt.Fprintf(out, "  (no tracked files — run `aimd remove %s` to forget this project)\n", key)
 		return 0, 0
 	}
 
