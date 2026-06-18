@@ -1,6 +1,7 @@
 # Build output
 aimd
 dist/
+completions/
 
 # Test coverage
 coverage*.out

@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write          # create the GitHub Release and upload assets
+  security-events: write   # upload grype SARIF to the Security tab
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # GoReleaser needs full history for the changelog
+          persist-credentials: false
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+          cache: true
+
+      # Pre-publish security gate: build an SBOM of the module graph, scan it
+      # with grype, and block the release on HIGH/CRITICAL findings. All four
+      # targets share one CGO_ENABLED=0 module graph, so a single scan suffices.
+      - name: Generate SBOM for scanning
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: aimd.cdx.json
+
+      - name: Scan SBOM with grype
+        id: scan
+        uses: anchore/scan-action@v6
+        with:
+          sbom: aimd.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Upload grype SARIF to Security tab
+        if: always()   # surface findings even when the gate fails the build
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: grype
+
+      # syft must be on PATH for GoReleaser's per-target `sboms` step.
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      # Only reached when the grype gate above passes.
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
