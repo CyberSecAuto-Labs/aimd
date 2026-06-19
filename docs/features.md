@@ -259,3 +259,32 @@ aimd remove [<project>]
 |---|---|
 | `--force` | Remove even if the project still has tracked files |
 | `--yes` | Skip confirmation prompt |
+
+## aimd reset
+
+Restore every tracked file on this machine before uninstalling.
+
+Tear aimd down on this machine: restore every tracked file in every project
+checked out here back to a real file (overlay → file, remove the symlink, strip
+the `.git/info/exclude` entry), then forget those projects from the registry and
+store. It is the all-projects extension of `aimd untrack .`.
+
+Run this immediately before uninstalling aimd. Homebrew's `--zap` only removes
+`~/.aimd`; it cannot reach into your project directories, so without reset a zap
+would leave broken symlinks and stale exclude entries behind.
+
+reset does **not** push: the store and registry live under `~/.aimd` (which a
+subsequent uninstall removes), so the remote and any other machines are left
+untouched. Projects not checked out on this machine are skipped — reset them from
+the machine where they live. Per-project failures are reported but do not abort
+the rest.
+
+reset prints what it will do and requires `--yes` to skip the confirmation prompt.
+
+```
+aimd reset
+```
+
+| Flag | Description |
+|---|---|
+| `--yes` | Skip confirmation prompt |

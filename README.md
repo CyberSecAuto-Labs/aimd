@@ -135,6 +135,7 @@ See [docs/features.md](docs/features.md) for full per-command documentation.
 | [`aimd doctor`](docs/features.md#aimd-doctor) | Run read-only health checks on store and links |
 | [`aimd log`](docs/features.md#aimd-log) | Show the history of store changes |
 | [`aimd remove`](docs/features.md#aimd-remove) | Forget a project entirely from store and registry |
+| [`aimd reset`](docs/features.md#aimd-reset) | Restore every tracked file on this machine before uninstalling |
 
 ## FAQ
 
