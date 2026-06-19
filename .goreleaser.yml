@@ -83,9 +83,8 @@ homebrew_casks:
       `brew uninstall --zap aimd` moves the store (~/.aimd) to the Trash. Any project
       still tracking files will be left with broken symlinks and stale
       .git/info/exclude entries — Homebrew cannot reach into project directories to
-      clean those up. Before uninstalling, restore the real files: run
-      `aimd status --all` to list tracked projects, then in each one run
-      `aimd untrack <file>` (restoring is the default) for the files it tracks.
+      clean those up. Before uninstalling, run `aimd reset` to restore every tracked
+      file in every project on this machine back to a real file.
 
 nfpms:
   - vendor: CyberSecAuto-Labs

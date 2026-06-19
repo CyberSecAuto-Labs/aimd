@@ -90,7 +90,7 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 	// (mirroring `track`'s recursion), so `aimd untrack .` cleans up a whole
 	// project in one shot. Explicitly named files pass through unchanged, so a
 	// mistyped or non-tracked path still gets the clear "is not a symlink" error.
-	expandedTargets, err := expandUntrackTargets(targets, storeDir, proj.Key, out)
+	expandedTargets, err := expandUntrackTargets(targets, proj.Root, storeDir, proj.Key, out)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 // `track`); only symlinks that point into THIS project's overlay are collected —
 // regular files and foreign symlinks are skipped silently. A directory with no
 // tracked files is a no-op with a clear message, not an error.
-func expandUntrackTargets(targets []string, storeDir, projectKey string, out io.Writer) ([]string, error) {
+func expandUntrackTargets(targets []string, projRoot, storeDir, projectKey string, out io.Writer) ([]string, error) {
 	projOverlayDir := filepath.Join(storeDir, "repos", projectKey)
 	var result []string
 	for _, target := range targets {
@@ -170,6 +170,17 @@ func expandUntrackTargets(targets []string, storeDir, projectKey string, out io.
 		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
 			result = append(result, abs)
 			continue
+		}
+
+		// Bound the directory walk to the project root. A directory target that
+		// escapes the git root (e.g. `..`, `~`, `/`) must not be walked: the walk
+		// would still find and untrack this project's files via an unexpectedly
+		// broad — and possibly very slow — traversal. (untrackFile only rejects
+		// symlinks physically outside the root, which cannot catch in-project files
+		// reached by walking an ancestor directory.)
+		rel, relErr := filepath.Rel(projRoot, abs)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return nil, fmt.Errorf("refusing to untrack %s: directory is outside the project root (%s)", target, projRoot)
 		}
 
 		before := len(result)

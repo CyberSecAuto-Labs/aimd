@@ -614,6 +614,42 @@ func TestRunUntrack_Directory_NoTrackedFilesIsNoOp(t *testing.T) {
 	}
 }
 
+// A directory target outside the project root is refused, leaving every tracked
+// file untouched — the walk must not reach into the project from an ancestor dir.
+func TestRunUntrack_Directory_OutsideProjectRootRefused(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir, storeDir := setupTrackedTree(t)
+	defer func() { _ = os.Chdir(orig) }()
+
+	claudeMd := filepath.Join(projectDir, "CLAUDE.md")
+	agentsMd := filepath.Join(projectDir, "docs", "AGENTS.md")
+
+	err = cmd.RunUntrack(
+		[]string{".."}, storeDir, "test-machine",
+		false, true, false,
+		strings.NewReader(""), io.Discard,
+	)
+	if err == nil {
+		t.Fatal("expected an error untracking a directory outside the project root, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside the project root") {
+		t.Errorf("error = %q, want it to mention the project-root boundary", err.Error())
+	}
+
+	// Every tracked file must still be a symlink — nothing was untracked.
+	if !isSymlink(t, claudeMd) {
+		t.Error("CLAUDE.md should still be a symlink after a refused `untrack ..`")
+	}
+	if !isSymlink(t, agentsMd) {
+		t.Error("docs/AGENTS.md should still be a symlink after a refused `untrack ..`")
+	}
+}
+
 // A subdirectory argument untracks only the tracked files beneath it, leaving
 // tracked files elsewhere in the project alone.
 func TestRunUntrack_Directory_SubdirScope(t *testing.T) {
