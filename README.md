@@ -51,6 +51,15 @@ The packages install the `aimd` binary plus bash, zsh, and fish completions. Pre
 `tar.gz` archives, a `checksums.txt`, and per-archive CycloneDX SBOMs are also attached to
 every release.
 
+> **macOS note:** the binary is not yet signed/notarized with an Apple Developer ID, so
+> Gatekeeper may block it with an "Apple could not verify 'aimd' is free of malware"
+> prompt. Homebrew installs clear this automatically. If you download a `tar.gz` archive
+> directly, strip the quarantine attribute after extracting:
+>
+> ```bash
+> xattr -dr com.apple.quarantine ./aimd
+> ```
+
 **From source:**
 
 Clone the repository, then build and install with the Go toolchain (Go 1.23+):

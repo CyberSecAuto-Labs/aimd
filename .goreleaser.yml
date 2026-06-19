@@ -61,6 +61,16 @@ homebrew_casks:
       bash: "completions/aimd.bash"
       zsh: "completions/aimd.zsh"
       fish: "completions/aimd.fish"
+    # The binary is not yet signed/notarized with an Apple Developer ID, so macOS
+    # Gatekeeper quarantines cask installs. Strip the quarantine attribute on
+    # install so `aimd` runs without the "Apple could not verify" prompt.
+    # Remove this once Developer ID signing + notarization lands (see roadmap).
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/aimd"]
+          end
 
 nfpms:
   - vendor: CyberSecAuto-Labs
