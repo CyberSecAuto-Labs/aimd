@@ -71,6 +71,21 @@ homebrew_casks:
           if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/aimd"]
           end
+    # `brew uninstall` removes only the binary. `~/.aimd` holds the user's store —
+    # their actual tracked files — so it is intentionally left alone on a plain
+    # uninstall (and on the uninstall half of `brew upgrade`). The store is cleaned
+    # up only via the opt-in `zap` stanza below: `brew uninstall --zap aimd`. We
+    # use `trash:` (recoverable) over `delete:` because it is user data.
+    zap:
+      trash:
+        - "~/.aimd"
+    caveats: |
+      `brew uninstall --zap aimd` moves the store (~/.aimd) to the Trash. Any project
+      still tracking files will be left with broken symlinks and stale
+      .git/info/exclude entries — Homebrew cannot reach into project directories to
+      clean those up. Before uninstalling, restore the real files: run
+      `aimd status --all` to list tracked projects, then in each one run
+      `aimd untrack <file>` (restoring is the default) for the files it tracks.
 
 nfpms:
   - vendor: CyberSecAuto-Labs
