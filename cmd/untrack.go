@@ -22,8 +22,9 @@ var (
 )
 
 var untrackCmd = &cobra.Command{
-	Use:   "untrack <path> [<path>...]",
-	Short: "Stop tracking a file and optionally restore or delete it",
+	Use:     "untrack <path> [<path>...]",
+	GroupID: "tracking",
+	Short:   "Stop tracking a file and optionally restore or delete it",
 	Long: `Remove a file from aimd tracking.
 
 By default (--restore), the file is copied back from the store to the

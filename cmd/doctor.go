@@ -25,8 +25,9 @@ var doctorAll bool
 var errDoctorProblems = errors.New("doctor found problems — see the suggested fixes above")
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Diagnose the health of the store and tracked files",
+	Use:     "doctor",
+	GroupID: "inspect",
+	Short:   "Diagnose the health of the store and tracked files",
 	Long: `Run a series of read-only health checks and report each one with a clear
 ✓ / ⚠ / ✗ status plus a suggested fix command for every failure.
 

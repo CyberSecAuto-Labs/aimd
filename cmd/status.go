@@ -24,8 +24,9 @@ var (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show the sync state of tracked AI context files",
+	Use:     "status",
+	GroupID: "inspect",
+	Short:   "Show the sync state of tracked AI context files",
 	Long: `Inspect tracked files and the store without modifying anything.
 
 By default status reports the current project only. Use --all to report every
