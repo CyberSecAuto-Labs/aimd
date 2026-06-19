@@ -19,8 +19,9 @@ import (
 var initYes bool
 
 var initCmd = &cobra.Command{
-	Use:   "init [<store-url>]",
-	Short: "Initialise the aimd store",
+	Use:     "init [<store-url>]",
+	GroupID: "setup",
+	Short:   "Initialise the aimd store",
 	Long: `Clone an existing aimd store or create a new one at ~/.aimd/store/.
 
 If <store-url> is not provided, you will be prompted to enter a Git remote URL.

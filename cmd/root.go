@@ -60,6 +60,13 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "setup", Title: "Setup:"},
+		&cobra.Group{ID: "tracking", Title: "Tracking:"},
+		&cobra.Group{ID: "sync", Title: "Sync:"},
+		&cobra.Group{ID: "inspect", Title: "Inspection:"},
+	)
+
 	rootCmd.PersistentFlags().StringVar(&storePath, "store", "", "Path to the aimd store (default: ~/.aimd/store)")
 	rootCmd.PersistentFlags().StringVar(&machine, "machine", "", "Machine name override (default: system hostname)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would happen without making changes")

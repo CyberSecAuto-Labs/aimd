@@ -18,8 +18,9 @@ import (
 var restoreForce bool
 
 var restoreCmd = &cobra.Command{
-	Use:   "restore",
-	Short: "Restore tracked files as symlinks in the current project",
+	Use:     "restore",
+	GroupID: "tracking",
+	Short:   "Restore tracked files as symlinks in the current project",
 	Long: `Pull the latest store state, then re-create symlinks for every tracked
 file that belongs to the current project.
 

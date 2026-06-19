@@ -21,8 +21,9 @@ var (
 )
 
 var removeCmd = &cobra.Command{
-	Use:   "remove [<project>]",
-	Short: "Forget a project entirely — drop it from the store and registry",
+	Use:     "remove [<project>]",
+	GroupID: "tracking",
+	Short:   "Forget a project entirely — drop it from the store and registry",
 	Long: `Remove a project from aimd: drop its registry entry and delete its
 overlays (repos/<key>/) and metadata from the store. This never touches the
 project's working tree — it only cleans up aimd's own bookkeeping.

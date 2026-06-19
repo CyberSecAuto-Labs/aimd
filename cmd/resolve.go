@@ -21,8 +21,9 @@ var (
 )
 
 var resolveCmd = &cobra.Command{
-	Use:   "resolve [file]",
-	Short: "Resolve a sync conflict in the private store",
+	Use:     "resolve [file]",
+	GroupID: "sync",
+	Short:   "Resolve a sync conflict in the private store",
 	Long: `Resolve a rebase conflict left behind by a failed aimd sync.
 
 When aimd sync rebases local store commits onto origin and a tracked overlay was

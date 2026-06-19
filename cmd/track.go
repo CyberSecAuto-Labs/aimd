@@ -22,8 +22,9 @@ import (
 )
 
 var trackCmd = &cobra.Command{
-	Use:   "track <path> [<path>...]",
-	Short: "Start tracking a file or directory in the private store",
+	Use:     "track <path> [<path>...]",
+	GroupID: "tracking",
+	Short:   "Start tracking a file or directory in the private store",
 	Long: `Copy a file (or all files in a directory) into the private aimd store,
 replace it with a symlink, and hide it from git status via .git/info/exclude.
 

@@ -25,8 +25,9 @@ var (
 )
 
 var watchCmd = &cobra.Command{
-	Use:   "watch",
-	Short: "Watch tracked files and sync after a quiet period",
+	Use:     "watch",
+	GroupID: "sync",
+	Short:   "Watch tracked files and sync after a quiet period",
 	Long: `Watch tracked AI context files and automatically sync each project to the
 private store after a debounce window elapses.
 

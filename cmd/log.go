@@ -19,8 +19,9 @@ var (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log",
-	Short: "Show the history of store changes for tracked files",
+	Use:     "log",
+	GroupID: "inspect",
+	Short:   "Show the history of store changes for tracked files",
 	Long: `List past store changes — what verb ran, which files it touched, on which
 machine, and how long ago.
 

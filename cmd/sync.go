@@ -17,8 +17,9 @@ import (
 var syncAll bool
 
 var syncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Sync tracked files with the private store",
+	Use:     "sync",
+	GroupID: "sync",
+	Short:   "Sync tracked files with the private store",
 	Long: `Sync the private aimd store with the remote origin.
 
 By default, aimd syncs only the current project (detected from the working directory).
