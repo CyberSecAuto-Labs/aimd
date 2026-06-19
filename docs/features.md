@@ -43,10 +43,17 @@ aimd track <path> [<path>...]
 
 ## aimd untrack
 
-Stop tracking a file and optionally restore or delete it.
+Stop tracking a file (or all tracked files in a directory) and optionally
+restore or delete it.
 
-By default (`--restore`), the file is copied back from the store to the project
-directory, the symlink is removed, and the overlay is deleted from the store.
+By default the file is copied back from the store to the project directory, the
+symlink is removed, and the overlay is deleted from the store.
+
+A directory argument (such as `.`) is walked recursively: every tracked file
+beneath it is untracked, while regular files and untracked symlinks are left
+alone. A directory containing no tracked files is a no-op. This mirrors how
+`aimd track` accepts a directory, so `aimd untrack .` tidies a whole project in
+one shot.
 
 With `--delete`, both the symlink and the overlay are deleted without restoring
 file content. Use this flag carefully — content will be lost.
