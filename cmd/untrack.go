@@ -25,11 +25,14 @@ var untrackCmd = &cobra.Command{
 	Use:     "untrack <path> [<path>...]",
 	GroupID: "tracking",
 	Short:   "Stop tracking a file and optionally restore or delete it",
-	Long: `Remove a file from aimd tracking.
+	Long: `Remove a file (or all tracked files in a directory) from aimd tracking.
 
-By default (--restore), the file is copied back from the store to the
-project directory, the symlink is removed, and the overlay is deleted
-from the store.
+By default the file is copied back from the store to the project directory,
+the symlink is removed, and the overlay is deleted from the store.
+
+A directory argument (such as ".") is walked recursively: every tracked file
+beneath it is untracked, while regular files and untracked symlinks are left
+alone. A directory containing no tracked files is a no-op.
 
 With --delete, both the symlink and the overlay are deleted without
 restoring file content.  Use this flag carefully — content will be lost.
@@ -83,12 +86,21 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 		}
 	}
 
-	// Step 4: Process each target file. Stop at the first failure but remember
+	// Step 4: Expand directory targets to the tracked symlinks beneath them
+	// (mirroring `track`'s recursion), so `aimd untrack .` cleans up a whole
+	// project in one shot. Explicitly named files pass through unchanged, so a
+	// mistyped or non-tracked path still gets the clear "is not a symlink" error.
+	expandedTargets, err := expandUntrackTargets(targets, storeDir, proj.Key, out)
+	if err != nil {
+		return err
+	}
+
+	// Step 5: Process each target file. Stop at the first failure but remember
 	// which files already succeeded so they can still be persisted.
 	var processed int
 	var untrackedRelPaths []string
 	var untrackErr error
-	for _, target := range targets {
+	for _, target := range expandedTargets {
 		if err := untrackFile(target, proj.Root, proj.Key, storeDir, machineName, linkMode, projEntry, deleteMode, yes, dryRun, in, out); err != nil {
 			untrackErr = err
 			break
@@ -114,7 +126,7 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 		return nil
 	}
 
-	// Step 5: Persist whatever succeeded — even when a later target failed — so the
+	// Step 6: Persist whatever succeeded — even when a later target failed — so the
 	// registry and store always reflect the actual on-disk state. A
 	// mid-batch failure can otherwise permanently delete an earlier file while the
 	// saved registry still lists it as tracked.
@@ -125,6 +137,83 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 	}
 
 	return untrackErr
+}
+
+// expandUntrackTargets resolves each target to a list of absolute paths to
+// untrack. A symlink or any non-directory target passes through unchanged, so an
+// explicitly named non-tracked path still produces untrackFile's clear
+// "is not a symlink" error. A directory target is walked recursively (mirroring
+// `track`); only symlinks that point into THIS project's overlay are collected —
+// regular files and foreign symlinks are skipped silently. A directory with no
+// tracked files is a no-op with a clear message, not an error.
+func expandUntrackTargets(targets []string, storeDir, projectKey string, out io.Writer) ([]string, error) {
+	projOverlayDir := filepath.Join(storeDir, "repos", projectKey)
+	var result []string
+	for _, target := range targets {
+		abs := target
+		if !filepath.IsAbs(abs) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("getting working directory: %w", err)
+			}
+			abs = filepath.Join(cwd, target)
+		}
+
+		fi, err := os.Lstat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", target, err)
+		}
+
+		// A symlink (a tracked file named directly) or any non-directory passes
+		// through to per-file validation. Using Lstat keeps a symlink-to-directory
+		// in this branch rather than walking into it.
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			result = append(result, abs)
+			continue
+		}
+
+		before := len(result)
+		if werr := filepath.WalkDir(abs, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() {
+				// Never descend into VCS metadata — mirrors track's expandTargets.
+				if isVCSDir(d.Name()) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Collect only symlinks that resolve into this project's overlay;
+			// regular files and foreign symlinks are skipped silently.
+			if d.Type()&os.ModeSymlink != 0 && isOverlaySymlink(path, projOverlayDir) {
+				result = append(result, path)
+			}
+			return nil
+		}); werr != nil {
+			return nil, fmt.Errorf("walking directory %s: %w", target, werr)
+		}
+
+		if len(result) == before {
+			_, _ = fmt.Fprintf(out, "No tracked files found under %s\n", target)
+		}
+	}
+	return result, nil
+}
+
+// isOverlaySymlink reports whether path is a symlink that resolves into
+// projOverlayDir — i.e. a file tracked by THIS project. Any read error is treated
+// as "not a tracked overlay symlink" so the directory walk skips it.
+func isOverlaySymlink(path, projOverlayDir string) bool {
+	linkTarget, err := os.Readlink(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(projOverlayDir, linkTarget)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 // untrackFile performs untracking of a single file.

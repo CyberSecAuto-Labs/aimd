@@ -487,3 +487,157 @@ func TestRunUntrack_DryRun(t *testing.T) {
 		t.Errorf("dry-run: overlay file %s should not have been removed", overlayPath)
 	}
 }
+
+// setupTrackedTree creates a project tracking CLAUDE.md and docs/AGENTS.md, plus
+// an untracked regular README.md. CWD is set to the project; callers must defer
+// restoring the original CWD. Returns (projectDir, storeDir).
+func setupTrackedTree(t *testing.T) (projectDir, storeDir string) {
+	t.Helper()
+
+	base := t.TempDir()
+	projectDir = filepath.Join(base, "project")
+	storeDir = filepath.Join(base, "store")
+	for _, d := range []string{projectDir, storeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeProjectRepo(t, projectDir)
+	makeStoreRepo(t, storeDir)
+
+	if err := os.MkdirAll(filepath.Join(projectDir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"CLAUDE.md":      "# claude\n",
+		"docs/AGENTS.md": "# agents\n",
+		"README.md":      "# readme (untracked)\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunTrack(
+		[]string{"CLAUDE.md", "docs/AGENTS.md"}, storeDir, "test-machine", false, io.Discard,
+	); err != nil {
+		t.Fatalf("RunTrack setup: %v", err)
+	}
+	return projectDir, storeDir
+}
+
+func isSymlink(t *testing.T, path string) bool {
+	t.Helper()
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat %s: %v", path, err)
+	}
+	return fi.Mode()&os.ModeSymlink != 0
+}
+
+// A directory argument untracks every tracked file beneath it and leaves
+// untracked regular files alone.
+func TestRunUntrack_Directory_RestoresAllTracked(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir, storeDir := setupTrackedTree(t)
+	defer func() { _ = os.Chdir(orig) }()
+
+	// Precondition: tracked files are symlinks.
+	if !isSymlink(t, filepath.Join(projectDir, "CLAUDE.md")) {
+		t.Fatal("precondition: CLAUDE.md should be a symlink before untrack")
+	}
+
+	if err := cmd.RunUntrack(
+		[]string{"."}, storeDir, "test-machine",
+		false, true, false,
+		strings.NewReader(""), io.Discard,
+	); err != nil {
+		t.Fatalf("RunUntrack(.) error = %v", err)
+	}
+
+	// Both tracked files restored to regular files.
+	for _, name := range []string{"CLAUDE.md", filepath.Join("docs", "AGENTS.md")} {
+		if isSymlink(t, filepath.Join(projectDir, name)) {
+			t.Errorf("%s should be a regular file after `untrack .`, still a symlink", name)
+		}
+	}
+
+	// The untracked regular file is left untouched (no error, not removed).
+	if isSymlink(t, filepath.Join(projectDir, "README.md")) {
+		t.Error("README.md should remain a regular file")
+	}
+}
+
+// A directory with no tracked files is a no-op with a clear message, not an error.
+func TestRunUntrack_Directory_NoTrackedFilesIsNoOp(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir, storeDir := setupTrackedTree(t)
+	defer func() { _ = os.Chdir(orig) }()
+
+	plain := filepath.Join(projectDir, "plain")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plain, "notes.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := cmd.RunUntrack(
+		[]string{"plain"}, storeDir, "test-machine",
+		false, true, false,
+		strings.NewReader(""), &out,
+	); err != nil {
+		t.Fatalf("RunUntrack(plain) error = %v", err)
+	}
+
+	if !strings.Contains(out.String(), "No tracked files found") {
+		t.Errorf("expected a no-op message, got: %q", out.String())
+	}
+	// Tracked files elsewhere remain untouched.
+	if !isSymlink(t, filepath.Join(projectDir, "CLAUDE.md")) {
+		t.Error("CLAUDE.md should still be a symlink after untracking an unrelated dir")
+	}
+}
+
+// A subdirectory argument untracks only the tracked files beneath it, leaving
+// tracked files elsewhere in the project alone.
+func TestRunUntrack_Directory_SubdirScope(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir, storeDir := setupTrackedTree(t)
+	defer func() { _ = os.Chdir(orig) }()
+
+	if err := cmd.RunUntrack(
+		[]string{"docs"}, storeDir, "test-machine",
+		false, true, false,
+		strings.NewReader(""), io.Discard,
+	); err != nil {
+		t.Fatalf("RunUntrack(docs) error = %v", err)
+	}
+
+	if isSymlink(t, filepath.Join(projectDir, "docs", "AGENTS.md")) {
+		t.Error("docs/AGENTS.md should be restored (not a symlink)")
+	}
+	if !isSymlink(t, filepath.Join(projectDir, "CLAUDE.md")) {
+		t.Error("CLAUDE.md should remain a symlink — only docs/ was untracked")
+	}
+}

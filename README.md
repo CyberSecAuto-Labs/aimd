@@ -126,7 +126,7 @@ See [docs/features.md](docs/features.md) for full per-command documentation.
 |---|---|
 | [`aimd init`](docs/features.md#aimd-init) | Clone or create your private context store |
 | [`aimd track`](docs/features.md#aimd-track) | Move a file into the store and symlink it back |
-| [`aimd untrack`](docs/features.md#aimd-untrack) | Stop tracking a file, restoring or deleting it |
+| [`aimd untrack`](docs/features.md#aimd-untrack) | Stop tracking a file or directory, restoring or deleting it |
 | [`aimd sync`](docs/features.md#aimd-sync) | Push, pull, or rebase overlay changes with the remote |
 | [`aimd restore`](docs/features.md#aimd-restore) | Re-create tracked symlinks after a fresh clone |
 | [`aimd status`](docs/features.md#aimd-status) | Show the sync state of tracked files |
@@ -149,8 +149,8 @@ or a self-hosted box you can `git push` to.
 
 **What happens to my file when I track it?**
 The original is copied into the store and replaced in place with a symlink, so every tool
-that reads it keeps working. `aimd untrack --restore` reverses this, putting the real file
-back in your project.
+that reads it keeps working. `aimd untrack` reverses this (restoring is the default), putting
+the real file back in your project.
 
 **Can I edit the same file on two machines?**
 Yes. `aimd sync` rebases divergent changes; if the same lines conflict, sync stops safely
