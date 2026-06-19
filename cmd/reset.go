@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -153,10 +154,15 @@ func planReset(reg *registry.Registry, machineName string) (targets []resetTarge
 	return targets, skipped
 }
 
-// resetProject restores every tracked file of one project, then forgets it from
-// the registry and store. A project with any file that fails to restore is kept
-// intact (registry + store entry preserved) so the user can retry — restoring
-// what succeeded but never forgetting a half-restored project.
+// resetProject restores every tracked file of one project; on full success it
+// also forgets the project from the registry and store, committing locally
+// without pushing. restoreTrackedFile is not atomic — each success deletes an
+// overlay, writes the real file, strips the exclude entry, and drops that file
+// from the in-memory registry — so a partial failure must still persist the
+// files that did restore: otherwise a retry would try to restore an
+// already-restored file from a missing overlay, and a later project's
+// registry. Save (the *Registry is shared) would persist these mutations
+// inconsistently anyway.
 func resetProject(
 	storeDir, registryPath, machineName string,
 	reg *registry.Registry,
@@ -171,6 +177,7 @@ func resetProject(
 	copy(tracked, t.proj.Tracked)
 
 	var firstErr error
+	var restored []string
 	for _, tf := range tracked {
 		abs := filepath.Join(t.localPath, tf.Path)
 		overlayPath := filepath.Join(storeDir, "repos", t.key, tf.Path)
@@ -179,11 +186,25 @@ func resetProject(
 			if firstErr == nil {
 				firstErr = rerr
 			}
+			continue
 		}
+		restored = append(restored, tf.Path)
 	}
 
 	if firstErr != nil {
-		_, _ = fmt.Fprintf(out, "⚠ %s: some files failed to restore — keeping its registry/store entry\n", t.name)
+		// Persist the files that did restore so the on-disk registry/store match
+		// reality, leaving retryable state — but keep the project entry for the
+		// files that still need attention.
+		if len(restored) > 0 {
+			if serr := registry.Save(registryPath, reg); serr != nil {
+				return errors.Join(firstErr, fmt.Errorf("saving registry after %s: %w", t.name, serr))
+			}
+			if serr := store.Commit(storeDir, t.key, t.localPath, "reset", machineName, restored); serr != nil && !isNothingToCommit(serr) {
+				return errors.Join(firstErr, fmt.Errorf("committing restored files for %s: %w", t.name, serr))
+			}
+		}
+		_, _ = fmt.Fprintf(out, "⚠ %s: restored %d of %d file(s); the rest failed — fix them and re-run `aimd reset`\n",
+			t.name, len(restored), len(tracked))
 		return firstErr
 	}
 

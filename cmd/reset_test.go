@@ -128,6 +128,77 @@ func TestRunReset_DryRunChangesNothing(t *testing.T) {
 	}
 }
 
+// A partial failure (one file's overlay missing) persists the successes so the
+// state is retryable: restored files drop out of the registry, the failed file
+// stays tracked, and a second attempt only retries the remaining file.
+func TestRunReset_PartialFailureIsRetryable(t *testing.T) {
+	// Not parallel — uses os.Chdir.
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	base, storeDir := newStore(t)
+	projDir := filepath.Join(base, "projA")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeProjectRepo(t, projDir)
+	for _, f := range []string{"A.md", "B.md"} {
+		if err := os.WriteFile(filepath.Join(projDir, f), []byte("# "+f+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunTrack([]string{"A.md", "B.md"}, storeDir, "test-machine", false, io.Discard); err != nil {
+		t.Fatalf("RunTrack: %v", err)
+	}
+
+	// Find the project key, then delete B.md's overlay to force its restore to fail.
+	var key string
+	for k := range reloadRegistry(t, storeDir).Projects {
+		key = k
+	}
+	if err := os.Remove(filepath.Join(storeDir, "repos", key, "B.md")); err != nil {
+		t.Fatalf("removing B.md overlay: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), &out); err == nil {
+		t.Fatal("expected reset to fail because B.md's overlay is missing")
+	}
+
+	// A.md restored to a real file; B.md left as a (now broken) symlink.
+	if isSymlink(t, filepath.Join(projDir, "A.md")) {
+		t.Error("A.md should be restored to a real file")
+	}
+	if !isSymlink(t, filepath.Join(projDir, "B.md")) {
+		t.Error("B.md should still be a symlink (its restore failed)")
+	}
+
+	// Registry: project kept, only B.md still tracked (A.md persisted as restored).
+	p, ok := reloadRegistry(t, storeDir).Projects[key]
+	if !ok {
+		t.Fatal("project should be kept after a partial failure")
+	}
+	if len(p.Tracked) != 1 || p.Tracked[0].Path != "B.md" {
+		t.Fatalf("expected only B.md still tracked, got %+v", p.Tracked)
+	}
+
+	// Second attempt retries only B.md — A.md is no longer tracked.
+	var out2 bytes.Buffer
+	if err := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), &out2); err == nil {
+		t.Fatal("second reset should still fail on B.md")
+	}
+	if strings.Contains(out2.String(), "A.md") {
+		t.Errorf("second attempt should not mention the already-restored A.md:\n%s", out2.String())
+	}
+}
+
 // Projects not checked out on the current machine are skipped and left intact.
 func TestRunReset_SkipsProjectsNotOnThisMachine(t *testing.T) {
 	// Not parallel — uses os.Chdir.
