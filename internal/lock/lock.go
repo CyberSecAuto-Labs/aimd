@@ -101,6 +101,14 @@ func lockFilePath(storeDir string) string {
 	return filepath.Join(storeDir, ".git", "aimd.lock")
 }
 
+// watchLockFilePath returns the watch-presence lock path — a separate file from
+// the store lock. A running `aimd watch` holds a *shared* lock here for its whole
+// lifetime, so teardown commands can detect "is any watcher running" by probing
+// for an exclusive lock, without contending with the per-sync store lock.
+func watchLockFilePath(storeDir string) string {
+	return filepath.Join(storeDir, ".git", "aimd-watch.lock")
+}
+
 // Acquire takes the store lock in the given mode, waiting up to DefaultTimeout.
 func Acquire(storeDir string, mode Mode) (*Handle, error) {
 	return AcquireWithTimeout(storeDir, mode, DefaultTimeout)
@@ -111,7 +119,37 @@ func Acquire(storeDir string, mode Mode) (*Handle, error) {
 // BusyError immediately if the lock is held. On success the returned Handle
 // must be released.
 func AcquireWithTimeout(storeDir string, mode Mode, timeout time.Duration) (*Handle, error) {
-	lockPath := lockFilePath(storeDir)
+	return acquireAt(lockFilePath(storeDir), mode, timeout)
+}
+
+// AcquireWatchPresence takes the shared watch-presence lock, held for the
+// lifetime of an `aimd watch` process. Multiple watchers coexist (shared); a
+// teardown command detects any of them via WatchRunning.
+func AcquireWatchPresence(storeDir string) (*Handle, error) {
+	return acquireAt(watchLockFilePath(storeDir), Shared, DefaultTimeout)
+}
+
+// WatchRunning reports whether a live `aimd watch` holds the watch-presence lock
+// for storeDir. It probes for an exclusive lock without waiting: if a watcher
+// holds the shared lock the probe is refused (→ true); otherwise it acquires and
+// immediately releases (→ false). A crashed watcher's lock is auto-released by
+// the kernel, so this never reports a dead watcher as running.
+func WatchRunning(storeDir string) (bool, error) {
+	h, err := acquireAt(watchLockFilePath(storeDir), Exclusive, 0)
+	if err != nil {
+		if IsBusy(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	_ = h.Release()
+	return false, nil
+}
+
+// acquireAt takes an flock on lockPath in the given mode, waiting up to timeout.
+// A zero timeout tries once and returns a BusyError immediately if the lock is
+// held. On success the returned Handle must be released.
+func acquireAt(lockPath string, mode Mode, timeout time.Duration) (*Handle, error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, fmt.Errorf("creating store lock directory: %w", err)
 	}

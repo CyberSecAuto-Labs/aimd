@@ -204,6 +204,73 @@ func TestSubprocess_SignalReleasesLock(t *testing.T) {
 	}
 }
 
+func TestWatchPresence(t *testing.T) {
+	dir := t.TempDir()
+
+	// No watcher yet.
+	running, err := lock.WatchRunning(dir)
+	if err != nil {
+		t.Fatalf("WatchRunning: %v", err)
+	}
+	if running {
+		t.Fatal("WatchRunning = true with no watcher present")
+	}
+
+	// One watcher registers presence.
+	a, err := lock.AcquireWatchPresence(dir)
+	if err != nil {
+		t.Fatalf("AcquireWatchPresence: %v", err)
+	}
+	running, err = lock.WatchRunning(dir)
+	if err != nil {
+		t.Fatalf("WatchRunning: %v", err)
+	}
+	if !running {
+		t.Fatal("WatchRunning = false while a watcher holds presence")
+	}
+
+	// A second watcher coexists (shared); presence still detected.
+	b, err := lock.AcquireWatchPresence(dir)
+	if err != nil {
+		t.Fatalf("second AcquireWatchPresence should coexist: %v", err)
+	}
+	if running, _ := lock.WatchRunning(dir); !running {
+		t.Fatal("WatchRunning = false with two watchers present")
+	}
+
+	// Releasing one leaves the other holding presence.
+	if err := a.Release(); err != nil {
+		t.Fatalf("Release a: %v", err)
+	}
+	if running, _ := lock.WatchRunning(dir); !running {
+		t.Fatal("WatchRunning = false while one watcher still holds presence")
+	}
+
+	// Releasing the last clears presence.
+	if err := b.Release(); err != nil {
+		t.Fatalf("Release b: %v", err)
+	}
+	if running, _ := lock.WatchRunning(dir); running {
+		t.Fatal("WatchRunning = true after all watchers released")
+	}
+}
+
+// The watch-presence lock and the store lock are independent files: holding the
+// store lock must not make WatchRunning report a watcher, and vice versa.
+func TestWatchPresence_IndependentFromStoreLock(t *testing.T) {
+	dir := t.TempDir()
+
+	h, err := lock.Acquire(dir, lock.Exclusive) // store lock
+	if err != nil {
+		t.Fatalf("Acquire store lock: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+
+	if running, _ := lock.WatchRunning(dir); running {
+		t.Fatal("WatchRunning = true while only the store lock is held")
+	}
+}
+
 // TestHelperProcess is re-executed as a subprocess by the death/signal tests.
 // Guarded by AIMD_LOCK_HELPER so it is a no-op under normal `go test`.
 func TestHelperProcess(_ *testing.T) {
