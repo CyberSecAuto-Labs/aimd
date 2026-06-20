@@ -30,14 +30,14 @@ func setupResolveConflict(t *testing.T) (cloneDir, bareDir, conflictRel string) 
 	syncGitRun(t, pusherDir, "config", "user.name", "test")
 	writeOverlay(t, pusherDir, conflictRel, "remote version\n")
 	syncGitRun(t, pusherDir, "add", conflictRel)
-	syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, pusherDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "remote overlay")
 	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
 
 	// Local edits the same overlay differently and commits.
 	writeOverlay(t, cloneDir, conflictRel, "local version\n")
 	syncGitRun(t, cloneDir, "add", conflictRel)
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "local overlay")
 
 	localPath := t.TempDir()
@@ -78,7 +78,7 @@ func setupModifyDeleteConflict(t *testing.T) (cloneDir, bareDir, conflictRel str
 	// that contains the file (a modify/delete needs the file present at base).
 	writeOverlay(t, cloneDir, conflictRel, "base\n")
 	syncGitRun(t, cloneDir, "add", conflictRel)
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "base overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -91,13 +91,13 @@ func setupModifyDeleteConflict(t *testing.T) (cloneDir, bareDir, conflictRel str
 	syncGitRun(t, pusherDir, "config", "user.name", "test")
 	writeOverlay(t, pusherDir, conflictRel, "remote modified\n")
 	syncGitRun(t, pusherDir, "add", conflictRel)
-	syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, pusherDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "remote modifies overlay")
 	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
 
 	// Local deletes the overlay.
 	syncGitRun(t, cloneDir, "rm", conflictRel)
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "local deletes overlay")
 
 	seedRegistry(t, cloneDir, "test-proj", t.TempDir(), []string{"CLAUDE.md"})
@@ -364,7 +364,7 @@ func TestResolveReportsFurtherConflicts(t *testing.T) {
 	} {
 		writeOverlay(t, pusherDir, c.rel, c.content)
 		syncGitRun(t, pusherDir, "add", c.rel)
-		syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd", "commit", "-m", c.msg)
+		syncGitRun(t, pusherDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot", "commit", "-m", c.msg)
 	}
 	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
 
@@ -375,7 +375,7 @@ func TestResolveReportsFurtherConflicts(t *testing.T) {
 	} {
 		writeOverlay(t, cloneDir, c.rel, c.content)
 		syncGitRun(t, cloneDir, "add", c.rel)
-		syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd", "commit", "-m", c.msg)
+		syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot", "commit", "-m", c.msg)
 	}
 
 	seedRegistry(t, cloneDir, "test-proj", t.TempDir(), []string{"CLAUDE.md", "AGENTS.md"})

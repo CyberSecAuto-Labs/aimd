@@ -48,7 +48,7 @@ func seedRemovableProject(t *testing.T, key, display string, tracked []registry.
 	}
 
 	gitStore(t, storeDir, "add", ".")
-	gitStore(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitStore(t, storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "seed: overlay and metadata")
 	return storeDir
 }

@@ -137,7 +137,7 @@ func TestRunWatch_FlushSyncsDirtyOverlayOnShutdown(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -204,7 +204,7 @@ func TestRunWatch_ShutdownSyncsDirtyOverlayWithNoPendingEvent(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -260,7 +260,7 @@ func TestRunWatch_ShutdownDoesNotSyncCleanOverlay(t *testing.T) {
 	}
 	// Commit + push so the overlay is clean and HEAD == origin/main.
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -312,7 +312,7 @@ func TestRunWatch_ShutdownSyncFailureReturnsError(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
