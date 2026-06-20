@@ -63,6 +63,18 @@ func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out 
 		return err
 	}
 
+	// Hold the exclusive store lock across the whole teardown (every project's
+	// restore + local registry/store updates) and across the confirmation
+	// prompt, so no other aimd process mutates the store concurrently. A dry-run
+	// mutates nothing.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	linkMode, err := loadLinkMode()
 	if err != nil {
 		return fmt.Errorf("link mode: %w", err)

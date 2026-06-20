@@ -55,6 +55,17 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 		return fmt.Errorf("detecting project: %w", err)
 	}
 
+	// Hold the exclusive store lock across the whole mutation (registry load
+	// through commit/push) so no other aimd process can mutate the store at the
+	// same time. A dry-run mutates nothing, so it skips the lock.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	// Step 3: Load registry.
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)

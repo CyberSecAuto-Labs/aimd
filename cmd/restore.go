@@ -44,6 +44,17 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		return err
 	}
 
+	// Hold the exclusive store lock across pull → restore → commit/push so no
+	// other aimd process mutates the store concurrently. A dry-run mutates
+	// nothing, so it skips the lock.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	// Step 1: Pull the store (warn on failure, continue).
 	pullOut, pullErr := store.Pull(storeDir)
 	if pullErr != nil {

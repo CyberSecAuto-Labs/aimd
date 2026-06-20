@@ -44,6 +44,17 @@ Sync handles four states:
 // dryRun prints what would happen without making changes.
 // out receives all user-facing output.
 func RunSync(storeDir, machineName string, all, dryRun bool, out io.Writer) error {
+	// Hold the exclusive store lock across the whole sync (fetch/pull/rebase +
+	// commit/push for every project) so no other aimd process mutates the store
+	// concurrently. A dry-run mutates nothing, so it skips the lock.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
 	if err != nil {

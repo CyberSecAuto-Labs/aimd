@@ -68,6 +68,16 @@ func RunUntrack(targets []string, storeDir, machineName string, deleteMode, yes,
 		return fmt.Errorf("detecting project: %w", err)
 	}
 
+	// Hold the exclusive store lock across the whole mutation so no other aimd
+	// process can mutate the store concurrently. A dry-run mutates nothing.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	// Step 3: Load registry.
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
