@@ -7,9 +7,12 @@
 // shared lock or report the store busy.
 //
 // The lock is advisory (it only constrains processes that call Acquire) and is
-// backed by flock(2) on the file <storeDir>/.aimd/lock. flock associates the
-// lock with the open file, so the kernel releases it automatically when the
-// holder exits — whether cleanly, on a crash, or on a signal — which means a
-// dead holder never blocks the next acquirer. The file also records the holder
-// PID and an ISO timestamp so a blocked process can report who holds the store.
+// backed by flock(2) on the file <storeDir>/.git/aimd.lock. It lives inside the
+// store's local .git directory because a lock is per-machine runtime state: it
+// must never show up in `git status`, never be committed, and never propagate to
+// other clones. flock associates the lock with the open file, so the kernel
+// releases it automatically when the holder exits — whether cleanly, on a
+// crash, or on a signal — which means a dead holder never blocks the next
+// acquirer. The file also records the holder PID and an ISO timestamp so a
+// blocked process can report who holds the store.
 package lock

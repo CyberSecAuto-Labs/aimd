@@ -42,7 +42,7 @@ func TestAcquire_CreatesLockFileWithHolder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = h.Release() })
 
-	data, err := os.ReadFile(filepath.Join(dir, ".aimd", "lock"))
+	data, err := os.ReadFile(filepath.Join(dir, ".git", "aimd.lock"))
 	if err != nil {
 		t.Fatalf("read lock file: %v", err)
 	}
@@ -158,12 +158,12 @@ func TestStaleLockFile_DoesNotBlock(t *testing.T) {
 	// A lock file left behind by a dead process (metadata present, no flock
 	// held) must not block a fresh acquirer.
 	dir := t.TempDir()
-	lockDir := filepath.Join(dir, ".aimd")
+	lockDir := filepath.Join(dir, ".git")
 	if err := os.MkdirAll(lockDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// PID 1 metadata with an old timestamp; no process holds the flock.
-	if err := os.WriteFile(filepath.Join(lockDir, "lock"), []byte("999999 2020-01-01T00:00:00Z\n"), 0o644); err != nil {
+	// Dead-PID metadata with an old timestamp; no process holds the flock.
+	if err := os.WriteFile(filepath.Join(lockDir, "aimd.lock"), []byte("999999 2020-01-01T00:00:00Z\n"), 0o644); err != nil {
 		t.Fatalf("seed lock file: %v", err)
 	}
 	h, err := lock.AcquireWithTimeout(dir, lock.Exclusive, 0)

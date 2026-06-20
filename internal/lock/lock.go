@@ -92,6 +92,15 @@ type Handle struct {
 // Mode reports the mode the handle was acquired in.
 func (h *Handle) Mode() Mode { return h.mode }
 
+// lockFilePath returns the lock file path for a store. The lock lives inside
+// the store's local .git directory rather than the versioned .aimd tree: a lock
+// is per-machine runtime state, so it must never appear in `git status`, never
+// be committed, and never propagate to other clones — exactly the guarantees
+// .git already provides for local repo state.
+func lockFilePath(storeDir string) string {
+	return filepath.Join(storeDir, ".git", "aimd.lock")
+}
+
 // Acquire takes the store lock in the given mode, waiting up to DefaultTimeout.
 func Acquire(storeDir string, mode Mode) (*Handle, error) {
 	return AcquireWithTimeout(storeDir, mode, DefaultTimeout)
@@ -102,7 +111,7 @@ func Acquire(storeDir string, mode Mode) (*Handle, error) {
 // BusyError immediately if the lock is held. On success the returned Handle
 // must be released.
 func AcquireWithTimeout(storeDir string, mode Mode, timeout time.Duration) (*Handle, error) {
-	lockPath := filepath.Join(storeDir, ".aimd", "lock")
+	lockPath := lockFilePath(storeDir)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, fmt.Errorf("creating store lock directory: %w", err)
 	}
