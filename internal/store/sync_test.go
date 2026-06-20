@@ -45,7 +45,7 @@ func addCommitFile(t *testing.T, dir, filename, content string) {
 		t.Fatalf("write %s: %v", filename, err)
 	}
 	gitRun(t, dir, "add", filename)
-	gitRun(t, dir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, dir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "add "+filename)
 }
 

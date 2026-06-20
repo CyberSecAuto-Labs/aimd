@@ -52,7 +52,7 @@ func setupStoreRepo(t *testing.T, projectKey string) (storeDir string, registryF
 	}
 
 	gitRun(t, storeDir, "add", ".")
-	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial")
 
 	return storeDir, registryFile
@@ -193,7 +193,7 @@ func TestPush(t *testing.T) {
 
 	// Create an initial commit in the clone and push it to bare so origin/main exists.
 	gitRun(t, cloneDir, "add", ".")
-	gitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial")
 	gitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -289,7 +289,7 @@ func TestPushMarkerClearedOnSuccess(t *testing.T) {
 	}
 
 	gitRun(t, cloneDir, "add", ".")
-	gitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial")
 	gitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -359,7 +359,7 @@ func TestOverlayFileDirtyIsolatesPaths(t *testing.T) {
 		t.Fatalf("write other.txt: %v", err)
 	}
 	gitRun(t, storeDir, "add", ".")
-	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "add other")
 
 	// Edit only file.txt.
@@ -529,7 +529,7 @@ func TestRemoveProjectNeverPushed(t *testing.T) {
 	// was registered but never had files pushed.
 	gitRun(t, storeDir, "rm", "-r", "--quiet", "--",
 		filepath.Join("repos", projectKey), filepath.Join("metadata", projectKey+".json"))
-	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "drop overlay")
 
 	if err := os.WriteFile(registryFile, []byte(`{"version":1,"projects":{}}`+"\n"), 0o600); err != nil {

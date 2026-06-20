@@ -124,13 +124,9 @@ func Sync(storeDir string) (SyncState, error) {
 		return StateAhead, nil
 
 	case StateDiverged:
-		rebaseOut, rebaseErr := gitCmd(
-			"-C", storeDir,
-			"-c", "user.email=aimd@localhost",
-			"-c", "user.name=aimd",
-			"-c", "commit.gpgsign=false",
-			"pull", "--rebase", "origin", "main",
-		).CombinedOutput()
+		rebaseArgs := append([]string{"-C", storeDir}, CommitIdentityArgs...)
+		rebaseArgs = append(rebaseArgs, "pull", "--rebase", "origin", "main")
+		rebaseOut, rebaseErr := gitCmd(rebaseArgs...).CombinedOutput()
 		if rebaseErr == nil {
 			return StateAhead, nil
 		}
