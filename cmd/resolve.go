@@ -71,6 +71,20 @@ func RunResolve(storeDir, fileArg string, keepLocal, keepRemote, abort, dryRun b
 	if keepLocal && keepRemote {
 		return fmt.Errorf("--keep-local and --keep-remote are mutually exclusive")
 	}
+
+	// Hold the exclusive store lock for the *entire* resolve sequence — the
+	// rebase state inspection, the (possibly long) interactive editor session,
+	// and git rebase --continue + push. A conflicted rebase is fragile shared
+	// state; no other aimd process may touch the store until resolve finishes or
+	// aborts. A dry-run mutates nothing, so it skips the lock.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	if !store.RebaseInProgress(storeDir) {
 		return fmt.Errorf("no rebase in progress — nothing to resolve (run `aimd sync` first)")
 	}

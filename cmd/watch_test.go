@@ -185,6 +185,66 @@ func TestRunWatch_FlushSyncsDirtyOverlayOnShutdown(t *testing.T) {
 	}
 }
 
+// A watcher whose project is forgotten mid-session (e.g. by a concurrent
+// `aimd reset`) must re-validate against the on-disk registry under the store
+// lock before syncing: it must neither error nor re-commit stale state for the
+// gone project, even when that project's overlay is dirty.
+func TestRunWatch_SkipsProjectForgottenDuringSession(t *testing.T) {
+	bareDir, cloneDir := setupSyncBareWithClone(t)
+
+	// Commit + push an initial overlay so HEAD == origin/main.
+	overlayDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	overlayFile := filepath.Join(overlayDir, "CLAUDE.md")
+	if err := os.WriteFile(overlayFile, []byte("# initial\n"), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"commit", "-m", "initial overlay")
+	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
+
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var out bytes.Buffer
+	done := runWatchAsync(ctx, cloneDir, "test-machine", 600, true, &out, &mu)
+
+	// Let the watcher register, then dirty the overlay so a sync would have
+	// something to commit and push.
+	time.Sleep(300 * time.Millisecond)
+	if err := os.WriteFile(overlayFile, []byte("# updated\n"), 0o600); err != nil {
+		t.Fatalf("update overlay: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Simulate `aimd reset` forgetting the project: drop it from the on-disk
+	// registry while watch still holds its startup snapshot.
+	seedEmptyRegistry(t, cloneDir)
+
+	cancel()
+	if err := waitWatch(t, done); err != nil {
+		t.Fatalf("RunWatch returned error: %v", err)
+	}
+
+	mu.Lock()
+	got := out.String()
+	mu.Unlock()
+	if !strings.Contains(got, "no longer tracked") {
+		t.Fatalf("expected the watcher to skip the forgotten project, got:\n%s", got)
+	}
+
+	// The forgotten project's dirty overlay must NOT have been committed/pushed.
+	bareLog := syncGitRun(t, bareDir, "log", "--oneline", "main")
+	if strings.Contains(bareLog, "sync:") {
+		t.Errorf("watcher re-committed a forgotten project's state:\n%s", bareLog)
+	}
+}
+
 // A file written immediately before Ctrl-C can have its fsnotify event still
 // queued when ctx cancellation wins Run's select, so the debounce flush sees no
 // pending key. Graceful shutdown must still sync the dirty overlay. This test

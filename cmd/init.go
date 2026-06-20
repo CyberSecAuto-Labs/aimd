@@ -103,6 +103,17 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 		return err
 	}
 
+	// The store directory now exists, so take the exclusive lock before
+	// scaffolding the registry and writing config — this serialises init
+	// against any other aimd process touching the same store. (The lock can't
+	// be taken before the clone: it would create files in the destination and
+	// make `git clone` refuse a non-empty target.)
+	release, lockErr := lockStoreExclusive(storeDir)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
+
 	// Step 6: scaffold if registry.json is missing.
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	if _, statErr := os.Stat(registryPath); os.IsNotExist(statErr) {

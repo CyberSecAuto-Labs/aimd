@@ -54,6 +54,17 @@ func RunRemove(args []string, storeDir, machineName string, force, yes, dryRun b
 		return err
 	}
 
+	// Hold the exclusive store lock across registry load → store removal →
+	// push, and across the confirmation prompt so the plan can't be invalidated
+	// by another aimd process mid-prompt. A dry-run mutates nothing.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
+	}
+
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
 	if err != nil {

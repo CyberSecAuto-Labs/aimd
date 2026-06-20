@@ -84,6 +84,19 @@ func RunDoctor(storeDir, machineName string, all bool, out io.Writer) error {
 		return err
 	}
 
+	// Take the shared lock so the health checks see a consistent store. If a
+	// mutating command holds the store exclusively, report it busy rather than
+	// running git checks mid-mutation (which would report spurious failures).
+	release, busy, lockErr := lockStoreShared(storeDir)
+	if lockErr != nil {
+		return lockErr
+	}
+	if busy {
+		_, _ = fmt.Fprintln(out, "store busy — another aimd command is updating it; retry shortly")
+		return nil
+	}
+	defer release()
+
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
 	if err != nil {

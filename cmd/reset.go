@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
+	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
@@ -61,6 +62,33 @@ type resetTarget struct {
 func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
+	}
+
+	// Refuse to tear down while a watcher is running: it would keep waking up to
+	// sync a store this command is about to dismantle (and that a follow-up
+	// uninstall will delete). A crashed watcher's presence lock is auto-released,
+	// so this only trips for a live `aimd watch`. A dry-run only previews, so it
+	// is allowed to run alongside a watcher.
+	if !dryRun {
+		running, werr := lock.WatchRunning(storeDir)
+		if werr != nil {
+			return fmt.Errorf("checking for a running watcher: %w", werr)
+		}
+		if running {
+			return fmt.Errorf("an `aimd watch` process is running — stop it first, then re-run `aimd reset`")
+		}
+	}
+
+	// Hold the exclusive store lock across the whole teardown (every project's
+	// restore + local registry/store updates) and across the confirmation
+	// prompt, so no other aimd process mutates the store concurrently. A dry-run
+	// mutates nothing.
+	if !dryRun {
+		release, lockErr := lockStoreExclusive(storeDir)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer release()
 	}
 
 	linkMode, err := loadLinkMode()
