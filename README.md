@@ -1,9 +1,16 @@
-# aimd
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/aimd-logo-dark.png">
+    <img src="docs/assets/aimd-logo.png" alt="aimd" width="320">
+  </picture>
+</p>
 
-[![CI](https://github.com/CyberSecAuto-Labs/aimd/actions/workflows/ci.yml/badge.svg)](https://github.com/CyberSecAuto-Labs/aimd/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/CyberSecAuto-Labs/aimd?sort=semver)](https://github.com/CyberSecAuto-Labs/aimd/releases/latest)
-[![Go version](https://img.shields.io/github/go-mod/go-version/CyberSecAuto-Labs/aimd)](go.mod)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/CyberSecAuto-Labs/aimd/actions/workflows/ci.yml"><img src="https://github.com/CyberSecAuto-Labs/aimd/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/CyberSecAuto-Labs/aimd/releases/latest"><img src="https://img.shields.io/github/v/release/CyberSecAuto-Labs/aimd?sort=semver" alt="Latest release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/CyberSecAuto-Labs/aimd" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+</p>
 
 Keep your private AI context files (`CLAUDE.md`, `AGENTS.md`) out of shared repos, versioned and synced through your own Git store.
 
