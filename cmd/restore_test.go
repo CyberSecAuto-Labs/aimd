@@ -23,8 +23,8 @@ func makeRestoreStore(t *testing.T, storeDir, projectKey, _ string, trackedFiles
 	// Initialise the store git repo with identity.
 	cmds := [][]string{
 		{"git", "-C", storeDir, "init"},
-		{"git", "-C", storeDir, "config", "user.email", "aimd@localhost"},
-		{"git", "-C", storeDir, "config", "user.name", "aimd"},
+		{"git", "-C", storeDir, "config", "user.email", "aimd-bot@cybersecauto-labs.org"},
+		{"git", "-C", storeDir, "config", "user.name", "aimd-bot"},
 	}
 	for _, c := range cmds {
 		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
@@ -72,7 +72,7 @@ func makeRestoreStore(t *testing.T, storeDir, projectKey, _ string, trackedFiles
 	// Initial commit so store.Commit() can add on top.
 	cmds2 := [][]string{
 		{"git", "-C", storeDir, "add", "."},
-		{"git", "-C", storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		{"git", "-C", storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 			"commit", "-m", "init: scaffold aimd store"},
 	}
 	for _, c := range cmds2 {

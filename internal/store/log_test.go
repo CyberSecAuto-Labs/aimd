@@ -110,7 +110,7 @@ func TestLogMixedTrailerAndLegacy(t *testing.T) {
 		t.Fatalf("write legacy file: %v", err)
 	}
 	gitRun(t, storeDir, "add", ".")
-	gitRun(t, storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "untrack: myproject [oldmachine 2026-01-01T00:00:00Z]")
 
 	// A modern trailer-bearing commit.

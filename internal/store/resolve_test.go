@@ -71,7 +71,7 @@ func setupModifyDelete(t *testing.T) (cloneDir, conflictFile string) {
 
 	// Local deletes the file.
 	gitRun(t, cloneDir, "rm", conflictFile)
-	gitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	gitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "local deletes "+conflictFile)
 
 	state, err := store.Sync(cloneDir)

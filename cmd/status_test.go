@@ -33,8 +33,8 @@ func makeStatusStore(t *testing.T, storeDir string, projects []statusProject) {
 
 	for _, c := range [][]string{
 		{"git", "-C", storeDir, "init"},
-		{"git", "-C", storeDir, "config", "user.email", "aimd@localhost"},
-		{"git", "-C", storeDir, "config", "user.name", "aimd"},
+		{"git", "-C", storeDir, "config", "user.email", "aimd-bot@cybersecauto-labs.org"},
+		{"git", "-C", storeDir, "config", "user.name", "aimd-bot"},
 	} {
 		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
 			t.Fatalf("%v: %v\n%s", c, err, out)
@@ -95,7 +95,7 @@ func makeStatusStore(t *testing.T, storeDir string, projects []statusProject) {
 
 	for _, c := range [][]string{
 		{"git", "-C", storeDir, "add", "."},
-		{"git", "-C", storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		{"git", "-C", storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 			"commit", "-m", "init: scaffold aimd store"},
 	} {
 		if out, err := exec.Command(c[0], c[1:]...).CombinedOutput(); err != nil {
@@ -715,16 +715,16 @@ func TestRunStatus_FetchBehind(t *testing.T) {
 	runGit(t, [][]string{
 		{"git", "init", "--bare", bareDir},
 		{"git", "init", seed},
-		{"git", "-C", seed, "config", "user.email", "aimd@localhost"},
-		{"git", "-C", seed, "config", "user.name", "aimd"},
+		{"git", "-C", seed, "config", "user.email", "aimd-bot@cybersecauto-labs.org"},
+		{"git", "-C", seed, "config", "user.name", "aimd-bot"},
 		{"git", "-C", seed, "add", "."},
 		{"git", "-C", seed, "commit", "-m", "init"},
 		{"git", "-C", seed, "remote", "add", "origin", bareDir},
 		{"git", "-C", seed, "push", "origin", "HEAD:main"},
 		{"git", "-C", bareDir, "symbolic-ref", "HEAD", "refs/heads/main"},
 		{"git", "clone", bareDir, storeDir},
-		{"git", "-C", storeDir, "config", "user.email", "aimd@localhost"},
-		{"git", "-C", storeDir, "config", "user.name", "aimd"},
+		{"git", "-C", storeDir, "config", "user.email", "aimd-bot@cybersecauto-labs.org"},
+		{"git", "-C", storeDir, "config", "user.name", "aimd-bot"},
 	})
 
 	// Lay out the store contents (overlay + registry) as untracked working-tree
@@ -740,8 +740,8 @@ func TestRunStatus_FetchBehind(t *testing.T) {
 	runGit(t, [][]string{{"git", "clone", bareDir, pusher}})
 	writeFile(t, filepath.Join(pusher, "remote.txt"), "remote")
 	runGit(t, [][]string{
-		{"git", "-C", pusher, "config", "user.email", "aimd@localhost"},
-		{"git", "-C", pusher, "config", "user.name", "aimd"},
+		{"git", "-C", pusher, "config", "user.email", "aimd-bot@cybersecauto-labs.org"},
+		{"git", "-C", pusher, "config", "user.name", "aimd-bot"},
 		{"git", "-C", pusher, "add", "."},
 		{"git", "-C", pusher, "commit", "-m", "remote change"},
 		{"git", "-C", pusher, "push", "origin", "HEAD:main"},

@@ -184,7 +184,7 @@ func TestRunLog_LegacyCommit(t *testing.T) {
 	writeFile(t, filepath.Join(storeDir, "repos", key, "old.txt"), "old")
 	runGit(t, [][]string{
 		{"git", "-C", storeDir, "add", "."},
-		{"git", "-C", storeDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		{"git", "-C", storeDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 			"commit", "-m", "untrack: myapp [oldbox 2026-01-01T00:00:00Z]"},
 	})
 

@@ -130,13 +130,9 @@ func resolveSide(storeDir, relPath, side string) error {
 //     *ConflictError) listing the newly conflicted files.
 //   - any other failure → (StateConflict, error) with the real git output.
 func ContinueRebase(storeDir string) (SyncState, error) {
-	cmd := gitCmd(
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"-c", "commit.gpgsign=false",
-		"rebase", "--continue",
-	)
+	args := append([]string{"-C", storeDir}, CommitIdentityArgs...)
+	args = append(args, "rebase", "--continue")
+	cmd := gitCmd(args...)
 	cmd.Env = append(cmd.Env, "GIT_EDITOR=true")
 	out, err := cmd.CombinedOutput()
 	if err == nil {

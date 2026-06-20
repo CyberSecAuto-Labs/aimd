@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
+	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
 var initYes bool
@@ -225,13 +226,9 @@ func scaffoldStore(storeDir, registryPath string, out io.Writer) error {
 	}
 
 	// Initial commit.
-	commitCmd := exec.Command("git",
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"-c", "commit.gpgsign=false",
-		"commit", "-m", "init: scaffold aimd store",
-	)
+	commitArgs := append([]string{"-C", storeDir}, store.CommitIdentityArgs...)
+	commitArgs = append(commitArgs, "commit", "-m", "init: scaffold aimd store")
+	commitCmd := exec.Command("git", commitArgs...)
 	if gitOut, err := commitCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(gitOut)))
 	}

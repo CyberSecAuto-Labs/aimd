@@ -100,13 +100,9 @@ func Commit(storeDir, projectKey, projectRoot, verb, machineName string, files [
 
 	msg := buildCommitMessage(title, verb, projectKey, machineName, files)
 
-	commitOut, err := gitCmd(
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"-c", "commit.gpgsign=false",
-		"commit", "-m", msg,
-	).CombinedOutput()
+	args := append([]string{"-C", storeDir}, CommitIdentityArgs...)
+	args = append(args, "commit", "-m", msg)
+	commitOut, err := gitCmd(args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(commitOut)))
 	}
@@ -187,13 +183,9 @@ func RemoveProject(storeDir, projectKey, displayName, machineName string) error 
 		displayName, machineName, time.Now().UTC().Format(time.RFC3339))
 	msg := buildCommitMessage(title, "remove", projectKey, machineName, nil)
 
-	commitOut, err := gitCmd(
-		"-C", storeDir,
-		"-c", "user.email=aimd@localhost",
-		"-c", "user.name=aimd",
-		"-c", "commit.gpgsign=false",
-		"commit", "-m", msg,
-	).CombinedOutput()
+	args := append([]string{"-C", storeDir}, CommitIdentityArgs...)
+	args = append(args, "commit", "-m", msg)
+	commitOut, err := gitCmd(args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git commit: %w — %s", err, strings.TrimSpace(string(commitOut)))
 	}

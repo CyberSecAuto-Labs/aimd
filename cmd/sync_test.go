@@ -48,7 +48,7 @@ func syncAddCommitFile(t *testing.T, dir, filename, content string) {
 	}
 	syncGitRun(t, dir, "add", filename)
 	syncGitRun(t, dir,
-		"-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "add "+filename)
 }
 
@@ -260,7 +260,7 @@ func TestSyncCmdAll_Ahead(t *testing.T) {
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
 	syncGitRun(t, cloneDir,
-		"-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "add overlay")
 
 	// Now cloneDir is AHEAD with staged changes already committed — RunSync should
@@ -302,7 +302,7 @@ func TestSyncCmdAll_AheadWithUnstagedChanges(t *testing.T) {
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
 	syncGitRun(t, cloneDir,
-		"-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -355,7 +355,7 @@ func TestSyncCmdAll_AheadCommitsRegistryAndLeavesCleanTree(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "test-proj", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -415,7 +415,7 @@ func TestSyncCmdAll_BehindPreservesRemoteRegistryChange(t *testing.T) {
 	localPath := t.TempDir()
 	seedRegistry(t, cloneDir, "myproj", localPath, []string{"CLAUDE.md"})
 	syncGitRun(t, cloneDir, "add", "-A")
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
@@ -429,7 +429,7 @@ func TestSyncCmdAll_BehindPreservesRemoteRegistryChange(t *testing.T) {
 	syncGitRun(t, pusherDir, "config", "user.name", "test")
 	addRegistryProject(t, pusherDir, "remote-proj", "machine-b")
 	syncGitRun(t, pusherDir, "add", filepath.Join(".aimd", "registry.json"))
-	syncGitRun(t, pusherDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, pusherDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "machine B adds remote-proj")
 	syncGitRun(t, pusherDir, "push", "origin", "HEAD:main")
 
@@ -611,7 +611,7 @@ func TestSyncCmdAll_CommitMessageFormat(t *testing.T) {
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "myapp", "CLAUDE.md"))
 	syncGitRun(t, cloneDir,
-		"-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+		"-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 
 	// Push initial state to make origin aware.
@@ -671,7 +671,7 @@ func TestSyncCmdAll_UpToDateWithDirtyOverlayCommitsAndPushes(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	syncGitRun(t, cloneDir, "add", filepath.Join("repos", "myapp", "CLAUDE.md"))
-	syncGitRun(t, cloneDir, "-c", "user.email=aimd@localhost", "-c", "user.name=aimd",
+	syncGitRun(t, cloneDir, "-c", "user.email=aimd-bot@cybersecauto-labs.org", "-c", "user.name=aimd-bot",
 		"commit", "-m", "initial overlay")
 	syncGitRun(t, cloneDir, "push", "origin", "HEAD:main")
 
