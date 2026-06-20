@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,51 @@ func TestMutatingCommand_ReleasesStoreLock(t *testing.T) {
 		t.Fatalf("store still locked after RunTrack returned: %v", err)
 	}
 	_ = h.Release()
+}
+
+// TestResolve_WaitsForStoreLock proves resolve takes the exclusive lock before
+// touching the rebase state and blocks while another holder has it — so no other
+// aimd process can disturb the store mid-resolution. Once the lock is free,
+// resolve proceeds (here reaching the "no rebase in progress" guard, which is
+// proof it got past the lock).
+func TestResolve_WaitsForStoreLock(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	held, err := lock.Acquire(storeDir, lock.Exclusive)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.RunResolve(storeDir, "", false, false, false, false, io.Discard)
+	}()
+
+	select {
+	case <-done:
+		_ = held.Release()
+		t.Fatal("RunResolve ran while the store was locked by another holder")
+	case <-time.After(300 * time.Millisecond):
+		// Expected: blocked waiting on the lock.
+	}
+
+	if err := held.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "no rebase in progress") {
+			t.Fatalf("expected 'no rebase in progress' once lock released, got %v", err)
+		}
+	case <-time.After(9 * time.Second):
+		t.Fatal("RunResolve did not complete after the lock was released")
+	}
 }
 
 // TestDryRun_DoesNotTakeStoreLock proves a dry-run mutates nothing and so does
