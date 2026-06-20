@@ -2,10 +2,12 @@ package cmd_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +271,81 @@ func TestStatus_SucceedsUnderSharedLock(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "store busy") {
 		t.Fatalf("status should coexist with another reader, got busy: %q", out.String())
+	}
+}
+
+// TestReset_RefusesWhileWatchPresent proves reset refuses whenever a watcher is
+// running — even an idle one that holds no store lock at that instant.
+func TestReset_RefusesWhileWatchPresent(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	// Simulate a running (idle) watcher: presence held, no store lock taken.
+	presence, err := lock.AcquireWatchPresence(storeDir)
+	if err != nil {
+		t.Fatalf("AcquireWatchPresence: %v", err)
+	}
+	t.Cleanup(func() { _ = presence.Release() })
+
+	err = cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard)
+	if err == nil {
+		t.Fatal("RunReset should refuse while a watcher is present")
+	}
+	if !strings.Contains(err.Error(), "aimd watch") {
+		t.Fatalf("expected a 'stop aimd watch' message, got: %v", err)
+	}
+
+	// A dry-run only previews, so it is allowed alongside a watcher.
+	if derr := cmd.RunReset(storeDir, "test-machine", true, true, strings.NewReader(""), io.Discard); derr != nil {
+		t.Fatalf("dry-run reset should be allowed while a watcher is present, got: %v", derr)
+	}
+
+	// Once the watcher stops, reset proceeds.
+	if rerr := presence.Release(); rerr != nil {
+		t.Fatalf("Release presence: %v", rerr)
+	}
+	if rerr := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard); rerr != nil {
+		t.Fatalf("reset after watcher stopped: %v", rerr)
+	}
+}
+
+// TestRunWatch_RegistersPresence proves a running watch registers presence so
+// teardown commands can detect it.
+func TestRunWatch_RegistersPresence(t *testing.T) {
+	_, cloneDir := setupSyncBareWithClone(t)
+	localPath := t.TempDir()
+	seedRegistry(t, cloneDir, "test-proj", localPath, []string{"CLAUDE.md"})
+
+	// The overlay dir must exist for the watcher to register the file.
+	overlayDir := filepath.Join(cloneDir, "repos", "test-proj")
+	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
+		t.Fatalf("mkdir overlay: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(overlayDir, "CLAUDE.md"), []byte("# ctx\n"), 0o600); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	var out bytes.Buffer
+	done := runWatchAsync(ctx, cloneDir, "test-machine", 600, true, &out, &mu)
+
+	// Give the watcher time to register presence.
+	time.Sleep(400 * time.Millisecond)
+	running, err := lock.WatchRunning(cloneDir)
+	if err != nil {
+		t.Fatalf("WatchRunning: %v", err)
+	}
+	cancel()
+	if werr := waitWatch(t, done); werr != nil {
+		t.Fatalf("RunWatch returned error: %v", werr)
+	}
+	if !running {
+		t.Fatal("expected WatchRunning = true while aimd watch is running")
 	}
 }
 

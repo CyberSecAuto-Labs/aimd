@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 	"github.com/CyberSecAuto-Labs/aimd/internal/watcher"
@@ -62,6 +63,16 @@ type watchFile struct {
 func RunWatch(ctx context.Context, storeDir, machineName string, debounceSecs int, all bool, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
+	}
+
+	// Register this watcher's presence for the whole session so a teardown
+	// (aimd reset) refuses while a watcher is running. Best-effort: if it can't
+	// be taken, watch still functions — the per-sync store lock remains the
+	// correctness guarantee; this only powers reset's "stop watch first" UX.
+	if presence, perr := lock.AcquireWatchPresence(storeDir); perr != nil {
+		_, _ = fmt.Fprintf(out, "warning: could not register watch presence: %v\n", perr)
+	} else {
+		defer func() { _ = presence.Release() }()
 	}
 
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
