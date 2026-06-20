@@ -153,6 +153,49 @@ func TestResolve_WaitsForStoreLock(t *testing.T) {
 	}
 }
 
+// TestReset_WaitsForStoreLock proves reset cannot tear down the store while
+// another process (e.g. a watcher mid-sync) holds the exclusive lock; once the
+// lock is free, reset proceeds.
+func TestReset_WaitsForStoreLock(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	held, err := lock.Acquire(storeDir, lock.Exclusive)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard)
+	}()
+
+	select {
+	case <-done:
+		_ = held.Release()
+		t.Fatal("RunReset ran while the store was locked by another holder")
+	case <-time.After(300 * time.Millisecond):
+		// Expected: blocked waiting on the lock.
+	}
+
+	if err := held.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunReset after lock released: %v", err)
+		}
+	case <-time.After(9 * time.Second):
+		t.Fatal("RunReset did not complete after the lock was released")
+	}
+}
+
 // TestDryRun_DoesNotTakeStoreLock proves a dry-run mutates nothing and so does
 // not contend for the exclusive lock even while another holder has it.
 func TestDryRun_DoesNotTakeStoreLock(t *testing.T) {

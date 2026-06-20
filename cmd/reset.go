@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
+	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
@@ -66,10 +67,14 @@ func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out 
 	// Hold the exclusive store lock across the whole teardown (every project's
 	// restore + local registry/store updates) and across the confirmation
 	// prompt, so no other aimd process mutates the store concurrently. A dry-run
-	// mutates nothing.
+	// mutates nothing. A watcher syncs under the same lock, so if it is busy the
+	// likely cause is a running `aimd watch` — say so.
 	if !dryRun {
 		release, lockErr := lockStoreExclusive(storeDir)
 		if lockErr != nil {
+			if lock.IsBusy(lockErr) {
+				return fmt.Errorf("the store is in use by another aimd process — if `aimd watch` is running, stop it first, then re-run `aimd reset`: %w", lockErr)
+			}
 			return lockErr
 		}
 		defer release()

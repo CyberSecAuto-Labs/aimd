@@ -84,39 +84,23 @@ func RunWatch(ctx context.Context, storeDir, machineName string, debounceSecs in
 
 	debounce := time.Duration(debounceSecs) * time.Second
 
-	// Serialize syncs: OnSync may fire concurrently from per-project timer
-	// goroutines, but every project pushes to the single shared store, so a mutex
-	// funnels concurrent commits/pushes into one at-a-time sequence.
-	var syncMu sync.Mutex
-	// syncOne runs one serialized project sync, prints the live-log lines, and
-	// returns the error so callers that need it (the shutdown sweep) can surface a
-	// failure as the command result. The live debounce path discards the error
-	// after logging because the watcher stays alive and retries on the next event.
-	syncOne := func(key string) error {
-		syncMu.Lock()
-		defer syncMu.Unlock()
-
-		target, ok := byKey[key]
-		if !ok {
-			return nil
-		}
-		proj := reg.Projects[key]
-		if proj == nil {
-			return nil
-		}
-		name := proj.DisplayName
-		if name == "" {
-			name = filepath.Base(target.root)
-		}
-		_, _ = fmt.Fprintf(out, "[%s] ↑ syncing %s...\n", time.Now().Format("15:04:05"), name)
-		if serr := syncProject(storeDir, key, name, proj, machineName, target.root, registryPath, dryRun, out); serr != nil {
-			_, _ = fmt.Fprintf(out, "[%s] error syncing %s: %v\n", time.Now().Format("15:04:05"), name, serr)
-			return serr
-		}
-		return nil
+	// syncer serializes syncs: OnSync may fire concurrently from per-project
+	// timer goroutines, but every project pushes to the single shared store, so
+	// its mutex funnels concurrent commits/pushes into one at-a-time sequence.
+	syncer := &watchSyncer{
+		storeDir:     storeDir,
+		machineName:  machineName,
+		registryPath: registryPath,
+		byKey:        byKey,
+		dryRun:       dryRun,
+		out:          out,
 	}
+	// syncOne returns the error so callers that need it (the shutdown sweep) can
+	// surface a failure as the command result. The live debounce path discards
+	// it after logging because the watcher stays alive and retries next event.
+	syncOne := syncer.sync
 	onSync := func(key string) {
-		_ = syncOne(key)
+		_ = syncer.sync(key)
 	}
 
 	onChange := func(e watcher.Event) {
@@ -193,6 +177,75 @@ func RunWatch(ctx context.Context, storeDir, machineName string, debounceSecs in
 	closeErr := w.Close()
 	_, _ = fmt.Fprintln(out, "aimd watch stopped")
 	return errors.Join(runErr, sweepErr, closeErr)
+}
+
+// watchSyncer runs one project sync at a time for the watch command. Its mutex
+// serializes the in-process timer goroutines; an exclusive store lock taken per
+// sync serializes against other aimd processes.
+type watchSyncer struct {
+	storeDir     string
+	machineName  string
+	registryPath string
+	byKey        map[string]projectTarget
+	dryRun       bool
+	out          io.Writer
+	mu           sync.Mutex
+}
+
+// sync performs one serialized project sync, printing the live-log lines. It
+// takes the exclusive store lock for the duration so a concurrent teardown
+// (aimd reset) and this watcher never mutate the store at once, and re-validates
+// the project against the on-disk registry under that lock so a project
+// forgotten since startup is dropped rather than re-committed.
+func (s *watchSyncer) sync(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	target, ok := s.byKey[key]
+	if !ok {
+		return nil
+	}
+
+	// If the store is busy (e.g. a reset is running), skip this sync and let the
+	// next change retry — the watcher must not die because the store is
+	// momentarily in use. A dry-run mutates nothing, so it skips the lock.
+	if !s.dryRun {
+		release, lockErr := lockStoreExclusive(s.storeDir)
+		if lockErr != nil {
+			_, _ = fmt.Fprintf(s.out, "[%s] store busy — skipping sync of %s for now\n",
+				time.Now().Format("15:04:05"), key)
+			return nil
+		}
+		defer release()
+	}
+
+	// Re-validate against the on-disk registry now that the lock is held: the
+	// startup snapshot can be stale. Sync the fresh entry, or drop the project
+	// entirely if it is gone — never re-commit state for a reset project.
+	freshReg, rerr := registry.LoadOrNew(s.registryPath)
+	if rerr != nil {
+		_, _ = fmt.Fprintf(s.out, "[%s] error reloading registry: %v\n", time.Now().Format("15:04:05"), rerr)
+		return fmt.Errorf("reloading registry: %w", rerr)
+	}
+	proj := freshReg.Projects[key]
+	if proj == nil {
+		_, _ = fmt.Fprintf(s.out, "[%s] %s is no longer tracked — skipping\n", time.Now().Format("15:04:05"), key)
+		return nil
+	}
+	name := proj.DisplayName
+	if name == "" {
+		name = filepath.Base(target.root)
+	}
+	localPath := target.root
+	if m, ok := proj.Machines[s.machineName]; ok && m.LocalPath != "" {
+		localPath = m.LocalPath
+	}
+	_, _ = fmt.Fprintf(s.out, "[%s] ↑ syncing %s...\n", time.Now().Format("15:04:05"), name)
+	if serr := syncProject(s.storeDir, key, name, proj, s.machineName, localPath, s.registryPath, s.dryRun, s.out); serr != nil {
+		_, _ = fmt.Fprintf(s.out, "[%s] error syncing %s: %v\n", time.Now().Format("15:04:05"), name, serr)
+		return serr
+	}
+	return nil
 }
 
 // collectOverlays builds the set of watchable overlay files keyed by their
