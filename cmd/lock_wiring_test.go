@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -193,6 +194,81 @@ func TestReset_WaitsForStoreLock(t *testing.T) {
 		}
 	case <-time.After(9 * time.Second):
 		t.Fatal("RunReset did not complete after the lock was released")
+	}
+}
+
+// TestStatus_ReportsBusyUnderExclusiveLock proves a read command degrades to a
+// "store busy" message instead of running git checks (and possibly erroring)
+// while a mutating command holds the store exclusively.
+func TestStatus_ReportsBusyUnderExclusiveLock(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	held, err := lock.Acquire(storeDir, lock.Exclusive)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Release() })
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &out); err != nil {
+		t.Fatalf("RunStatus under exclusive lock should not error, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "store busy") {
+		t.Fatalf("expected a 'store busy' message, got: %q", out.String())
+	}
+}
+
+// TestDoctor_ReportsBusyUnderExclusiveLock is the doctor counterpart.
+func TestDoctor_ReportsBusyUnderExclusiveLock(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	held, err := lock.Acquire(storeDir, lock.Exclusive)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Release() })
+
+	var out bytes.Buffer
+	if err := cmd.RunDoctor(storeDir, "test-machine", true, &out); err != nil {
+		t.Fatalf("RunDoctor under exclusive lock should not error, got: %v", err)
+	}
+	if !strings.Contains(out.String(), "store busy") {
+		t.Fatalf("expected a 'store busy' message, got: %q", out.String())
+	}
+}
+
+// TestStatus_SucceedsUnderSharedLock proves read commands coexist: a shared lock
+// held elsewhere does not make status report busy.
+func TestStatus_SucceedsUnderSharedLock(t *testing.T) {
+	base := t.TempDir()
+	storeDir := filepath.Join(base, "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makeStoreRepo(t, storeDir)
+
+	held, err := lock.Acquire(storeDir, lock.Shared)
+	if err != nil {
+		t.Fatalf("Acquire shared: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Release() })
+
+	var out bytes.Buffer
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &out); err != nil {
+		t.Fatalf("RunStatus under a shared lock: %v", err)
+	}
+	if strings.Contains(out.String(), "store busy") {
+		t.Fatalf("status should coexist with another reader, got busy: %q", out.String())
 	}
 }
 

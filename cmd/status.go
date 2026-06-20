@@ -76,6 +76,20 @@ func RunStatus(storeDir, machineName string, all, allMachines, fetch bool, out i
 		return err
 	}
 
+	// Take the shared lock for a consistent read. If a mutating command holds
+	// the store exclusively, report it busy rather than running git checks
+	// against a store mid-mutation (which would surface confusing transient
+	// errors). The lock is released as soon as the snapshot is read.
+	release, busy, lockErr := lockStoreShared(storeDir)
+	if lockErr != nil {
+		return lockErr
+	}
+	if busy {
+		_, _ = fmt.Fprintln(out, "store busy — another aimd command is updating it; retry shortly")
+		return nil
+	}
+	defer release()
+
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
 	if err != nil {
