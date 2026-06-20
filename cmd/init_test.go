@@ -356,10 +356,10 @@ func TestRunInit_ExistingGitStoreRecovery(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-b", "main", storeDir).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
-	if out, err := exec.Command("git", "-C", storeDir, "config", "user.email", "aimd@localhost").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", storeDir, "config", "user.email", "aimd-bot@cybersecauto-labs.org").CombinedOutput(); err != nil {
 		t.Fatalf("git config: %v\n%s", err, out)
 	}
-	if out, err := exec.Command("git", "-C", storeDir, "config", "user.name", "aimd").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", storeDir, "config", "user.name", "aimd-bot").CombinedOutput(); err != nil {
 		t.Fatalf("git config: %v\n%s", err, out)
 	}
 
