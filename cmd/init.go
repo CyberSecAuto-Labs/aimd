@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
+	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
@@ -93,7 +94,7 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 			}
 			answer := strings.TrimSpace(strings.ToLower(line))
 			if answer != "y" && answer != "yes" {
-				_, _ = fmt.Fprintln(out, "aborted")
+				_, _ = fmt.Fprintln(out, "Aborted.")
 				return nil
 			}
 		}
@@ -136,7 +137,21 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 	// Step 8: success message.
 	_, _ = fmt.Fprintf(out, "✓ aimd store initialised\n  remote: %s\n  store:  %s\n  machine: %s\n",
 		url, storeDir, machineName)
+
+	// Step 9: point at the obvious next step.
+	printInitNextStep(out, registryPath)
 	return nil
+}
+
+// printInitNextStep points the user at what to do after init. A store cloned
+// from a remote that already holds tracked projects wants `restore --all` to
+// materialise them; a brand-new (empty) store wants the user to start tracking.
+func printInitNextStep(out io.Writer, registryPath string) {
+	if reg, regErr := registry.LoadOrNew(registryPath); regErr == nil && len(reg.Projects) > 0 {
+		_, _ = fmt.Fprintf(out, "\nNext: run `aimd restore --all` to materialise your tracked files.\n")
+		return
+	}
+	_, _ = fmt.Fprintf(out, "\nNext: cd into a project and run `aimd track <file>` to start tracking.\n")
 }
 
 // cloneOrInit sets up the store at storeDir from the given remote URL.
