@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,7 +17,10 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
-var resetYes bool
+var (
+	resetYes    bool
+	resetRemote bool
+)
 
 var resetCmd = &cobra.Command{
 	Use:     "reset",
@@ -37,10 +41,16 @@ subsequent uninstall removes), so the remote and any other machines are left
 untouched. Projects not checked out on this machine are skipped — reset them
 from the machine where they live.
 
+With --remote, reset also WIPES the shared remote store: after restoring this
+machine's files it removes every project everywhere and replaces the remote's
+history with a single empty commit (force-push). Every other machine then sees
+an empty store on its next sync and must run its own aimd reset to clean up.
+--remote requires typing the remote URL to confirm (--yes does not bypass it).
+
 reset prints what it will do and requires --yes to skip the confirmation prompt.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return RunReset(storePath, machine, resetYes, dryRun, os.Stdin, cmd.OutOrStdout())
+		return RunReset(storePath, machine, resetYes, dryRun, resetRemote, os.Stdin, cmd.OutOrStdout())
 	},
 }
 
@@ -58,38 +68,21 @@ type resetTarget struct {
 // storeDir is the resolved path to ~/.aimd/store. machineName identifies the
 // current machine; only projects checked out here are restored. yes skips the
 // confirmation prompt. dryRun lists what would happen without touching anything.
-// in is used for reading confirmation input; out receives all user-facing output.
-func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out io.Writer) error {
+// remote also wipes the shared remote store and its history after the local
+// teardown. in is used for reading confirmation input; out receives all
+// user-facing output.
+func RunReset(storeDir, machineName string, yes, dryRun, remote bool, in io.Reader, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
 	}
 
-	// Refuse to tear down while a watcher is running: it would keep waking up to
-	// sync a store this command is about to dismantle (and that a follow-up
-	// uninstall will delete). A crashed watcher's presence lock is auto-released,
-	// so this only trips for a live `aimd watch`. A dry-run only previews, so it
-	// is allowed to run alongside a watcher.
-	if !dryRun {
-		running, werr := lock.WatchRunning(storeDir)
-		if werr != nil {
-			return fmt.Errorf("checking for a running watcher: %w", werr)
-		}
-		if running {
-			return fmt.Errorf("an `aimd watch` process is running — stop it first, then re-run `aimd reset`")
-		}
+	// Guard against a concurrent watcher and hold the exclusive store lock for
+	// the whole teardown (a dry-run mutates nothing, so it takes no lock).
+	release, err := resetGuards(storeDir, dryRun)
+	if err != nil {
+		return err
 	}
-
-	// Hold the exclusive store lock across the whole teardown (every project's
-	// restore + local registry/store updates) and across the confirmation
-	// prompt, so no other aimd process mutates the store concurrently. A dry-run
-	// mutates nothing.
-	if !dryRun {
-		release, lockErr := lockStoreExclusive(storeDir)
-		if lockErr != nil {
-			return lockErr
-		}
-		defer release()
-	}
+	defer release()
 
 	linkMode, err := loadLinkMode()
 	if err != nil {
@@ -102,9 +95,21 @@ func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out 
 		return fmt.Errorf("loading registry: %w", err)
 	}
 
+	// For --remote, resolve the remote URL up front so a missing remote fails
+	// before any teardown.
+	var remoteURL string
+	if remote {
+		remoteURL, err = store.RemoteURL(storeDir)
+		if err != nil {
+			return fmt.Errorf("--remote: %w", err)
+		}
+	}
+
 	targets, skipped := planReset(reg, machineName)
 
-	if len(targets) == 0 {
+	// Plain reset with nothing checked out here is a no-op. A --remote wipe still
+	// has work to do (empty the remote), so it falls through.
+	if len(targets) == 0 && !remote {
 		_, _ = fmt.Fprintf(out, "No projects checked out on %q — nothing to reset.\n", machineName)
 		for _, k := range skipped {
 			_, _ = fmt.Fprintf(out, "  (skipped %s — not checked out here)\n", k)
@@ -112,31 +117,153 @@ func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out 
 		return nil
 	}
 
-	// Print the plan before acting so the user knows exactly what changes.
-	_, _ = fmt.Fprintf(out, "aimd reset will restore tracked files and forget these projects on %q:\n", machineName)
+	totalFiles := printResetPlan(out, machineName, targets, skipped, remote, remoteURL)
+
+	if dryRun {
+		printResetDryRun(out, totalFiles, len(targets), remote)
+		return nil
+	}
+
+	if !confirmReset(out, in, yes, remote, remoteURL) {
+		if remote {
+			_, _ = fmt.Fprintf(out, "Confirmation did not match — nothing was changed.\n")
+		} else {
+			_, _ = fmt.Fprintf(out, "Aborted.\n")
+		}
+		return nil
+	}
+
+	// Local teardown: restore this machine's files and forget those projects.
+	firstErr := runLocalTeardown(storeDir, registryPath, machineName, reg, targets, linkMode, out)
+
+	// Remote wipe — only after a fully successful local teardown, so the remote
+	// is never destroyed while local state is incomplete and retryable.
+	if remote {
+		if firstErr != nil {
+			_, _ = fmt.Fprintf(out, "⚠ local teardown did not complete — the remote was left untouched. Fix the errors above and re-run `aimd reset --remote`.\n")
+			return firstErr
+		}
+		if werr := wipeRemote(storeDir, machineName, out); werr != nil {
+			return werr
+		}
+	}
+
+	return firstErr
+}
+
+// printResetPlan prints what the teardown will do and returns the total tracked
+// file count across the local targets.
+func printResetPlan(out io.Writer, machineName string, targets []resetTarget, skipped []string, remote bool, remoteURL string) int {
+	if len(targets) > 0 {
+		_, _ = fmt.Fprintf(out, "aimd reset will restore tracked files and forget these projects on %q:\n", machineName)
+	}
 	var totalFiles int
 	for _, t := range targets {
 		totalFiles += len(t.proj.Tracked)
 		_, _ = fmt.Fprintf(out, "  %s (%d file(s)) → %s\n", t.name, len(t.proj.Tracked), t.localPath)
 	}
+
+	if remote {
+		_, _ = fmt.Fprintf(out, "\nThis will WIPE the remote store and replace its history:\n")
+		_, _ = fmt.Fprintf(out, "  remote: %s\n", remoteURL)
+		_, _ = fmt.Fprintf(out, "  every project is removed everywhere; all store history is discarded.\n")
+		if len(skipped) > 0 {
+			_, _ = fmt.Fprintf(out, "  WARNING: these projects are not checked out here and cannot be restored from this machine —\n")
+			_, _ = fmt.Fprintf(out, "           their other machines will be left with broken symlinks until each runs `aimd reset`:\n")
+			for _, k := range skipped {
+				_, _ = fmt.Fprintf(out, "             %s\n", k)
+			}
+		}
+		return totalFiles
+	}
+
 	for _, k := range skipped {
 		_, _ = fmt.Fprintf(out, "  (skipped %s — not checked out on this machine)\n", k)
 	}
 	_, _ = fmt.Fprintf(out, "(no push — the remote and other machines are untouched; finish with `brew uninstall --zap aimd`)\n")
+	return totalFiles
+}
 
+// confirmRemoteWipe requires the user to type the remote URL exactly. --yes does
+// not satisfy this gate, so a script cannot wipe the remote unattended; no input
+// (EOF) reads as an empty string and fails the match.
+func confirmRemoteWipe(out io.Writer, in io.Reader, remoteURL string) bool {
+	_, _ = fmt.Fprintf(out, "Type the remote URL to confirm the wipe: ")
+	var typed string
+	_, _ = fmt.Fscan(in, &typed)
+	return strings.TrimSpace(typed) == remoteURL
+}
+
+// wipeRemote rewrites the store to a single empty root commit and force-pushes
+// it, replacing the remote history. On a push failure the local store is already
+// wiped but the remote is retained for other machines, and the push is
+// retryable.
+func wipeRemote(storeDir, machineName string, out io.Writer) error {
+	if err := store.ResetHistory(storeDir, machineName); err != nil {
+		return fmt.Errorf("wiping local store: %w", err)
+	}
+	if err := store.ForcePush(storeDir); err != nil {
+		_, _ = fmt.Fprintf(out, "⚠ local store wiped, but the remote force-push failed — the remote still holds the old data.\n  Re-run `aimd reset --remote` to retry the push.\n")
+		return fmt.Errorf("force-pushing wiped store: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "✓ Remote store wiped and history replaced. Other machines must run `aimd reset` (then re-run `aimd init`) to recover.\n")
+	return nil
+}
+
+// resetGuards refuses to run while a watcher is live (it would keep waking up to
+// sync a store this command is dismantling) and takes the exclusive store lock
+// for the duration. A dry-run mutates nothing, so it skips both and returns a
+// no-op release.
+func resetGuards(storeDir string, dryRun bool) (release func(), err error) {
 	if dryRun {
-		_, _ = fmt.Fprintf(out, "dry-run: would restore %d file(s) across %d project(s)\n", totalFiles, len(targets))
-		return nil
+		return func() {}, nil
 	}
-
-	if !yes {
-		confirmed, _ := confirmPrompt(out, in, "Continue?")
-		if !confirmed {
-			_, _ = fmt.Fprintf(out, "Aborted.\n")
-			return nil
-		}
+	running, werr := lock.WatchRunning(storeDir)
+	if werr != nil {
+		return nil, fmt.Errorf("checking for a running watcher: %w", werr)
 	}
+	if running {
+		return nil, fmt.Errorf("an `aimd watch` process is running — stop it first, then re-run `aimd reset`")
+	}
+	r, lockErr := lockStoreExclusive(storeDir)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	return r, nil
+}
 
+// printResetDryRun prints the dry-run summary line.
+func printResetDryRun(out io.Writer, totalFiles, projectCount int, remote bool) {
+	if remote {
+		_, _ = fmt.Fprintf(out, "dry-run: would restore %d file(s) across %d project(s) and WIPE the remote store\n", totalFiles, projectCount)
+		return
+	}
+	_, _ = fmt.Fprintf(out, "dry-run: would restore %d file(s) across %d project(s)\n", totalFiles, projectCount)
+}
+
+// confirmReset gates the teardown. --remote demands typing the remote URL (no
+// --yes shortcut); plain reset accepts --yes or a y/N prompt.
+func confirmReset(out io.Writer, in io.Reader, yes, remote bool, remoteURL string) bool {
+	if remote {
+		return confirmRemoteWipe(out, in, remoteURL)
+	}
+	if yes {
+		return true
+	}
+	confirmed, _ := confirmPrompt(out, in, "Continue?")
+	return confirmed
+}
+
+// runLocalTeardown restores and forgets each target project, printing a summary.
+// It returns the first error encountered; per-project failures do not abort the
+// rest (each persists what it restored, cf. the partial-failure handling).
+func runLocalTeardown(
+	storeDir, registryPath, machineName string,
+	reg *registry.Registry,
+	targets []resetTarget,
+	linkMode link.LinkMode,
+	out io.Writer,
+) error {
 	var firstErr error
 	var done int
 	for _, t := range targets {
@@ -148,8 +275,9 @@ func RunReset(storeDir, machineName string, yes, dryRun bool, in io.Reader, out 
 		}
 		done++
 	}
-
-	_, _ = fmt.Fprintf(out, "✓ Reset %d of %d project(s); tracked files restored to your working trees.\n", done, len(targets))
+	if len(targets) > 0 {
+		_, _ = fmt.Fprintf(out, "✓ Reset %d of %d project(s); tracked files restored to your working trees.\n", done, len(targets))
+	}
 	return firstErr
 }
 
@@ -249,5 +377,6 @@ func resetProject(
 
 func init() {
 	resetCmd.Flags().BoolVar(&resetYes, "yes", false, "Skip confirmation prompt")
+	resetCmd.Flags().BoolVar(&resetRemote, "remote", false, "Also wipe the shared remote store and its history (decommission everywhere)")
 	rootCmd.AddCommand(resetCmd)
 }

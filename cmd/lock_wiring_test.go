@@ -174,7 +174,7 @@ func TestReset_WaitsForStoreLock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard)
+		done <- cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), io.Discard)
 	}()
 
 	select {
@@ -291,7 +291,7 @@ func TestReset_RefusesWhileWatchPresent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = presence.Release() })
 
-	err = cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard)
+	err = cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), io.Discard)
 	if err == nil {
 		t.Fatal("RunReset should refuse while a watcher is present")
 	}
@@ -300,7 +300,7 @@ func TestReset_RefusesWhileWatchPresent(t *testing.T) {
 	}
 
 	// A dry-run only previews, so it is allowed alongside a watcher.
-	if derr := cmd.RunReset(storeDir, "test-machine", true, true, strings.NewReader(""), io.Discard); derr != nil {
+	if derr := cmd.RunReset(storeDir, "test-machine", true, true, false, strings.NewReader(""), io.Discard); derr != nil {
 		t.Fatalf("dry-run reset should be allowed while a watcher is present, got: %v", derr)
 	}
 
@@ -308,7 +308,7 @@ func TestReset_RefusesWhileWatchPresent(t *testing.T) {
 	if rerr := presence.Release(); rerr != nil {
 		t.Fatalf("Release presence: %v", rerr)
 	}
-	if rerr := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), io.Discard); rerr != nil {
+	if rerr := cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), io.Discard); rerr != nil {
 		t.Fatalf("reset after watcher stopped: %v", rerr)
 	}
 }
