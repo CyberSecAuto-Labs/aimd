@@ -217,7 +217,7 @@ func TestStatus_ReportsBusyUnderExclusiveLock(t *testing.T) {
 	t.Cleanup(func() { _ = held.Release() })
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus under exclusive lock should not error, got: %v", err)
 	}
 	if !strings.Contains(out.String(), "store busy") {
@@ -266,7 +266,7 @@ func TestStatus_SucceedsUnderSharedLock(t *testing.T) {
 	t.Cleanup(func() { _ = held.Release() })
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus under a shared lock: %v", err)
 	}
 	if strings.Contains(out.String(), "store busy") {

@@ -228,7 +228,7 @@ func TestRunRemove_Integration(t *testing.T) {
 	}
 
 	var statusBuf bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &statusBuf); err != nil {
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, false, &statusBuf); err != nil {
 		t.Fatalf("RunStatus --all: %v", err)
 	}
 	if !strings.Contains(statusBuf.String(), "aimd remove") {
@@ -258,7 +258,7 @@ func TestRunRemove_Integration(t *testing.T) {
 	}
 
 	var status2 bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, &status2); err != nil {
+	if err := cmd.RunStatus(storeDir, "test-machine", true, false, false, false, &status2); err != nil {
 		t.Fatalf("RunStatus --all after remove: %v", err)
 	}
 	if strings.Contains(status2.String(), key) {
