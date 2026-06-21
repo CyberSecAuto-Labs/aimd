@@ -281,9 +281,19 @@ func runLocalTeardown(
 	return firstErr
 }
 
-// planReset splits the registry into projects restorable on this machine
-// (returned in stable key order) and the keys of projects checked out elsewhere.
-func planReset(reg *registry.Registry, machineName string) (targets []resetTarget, skipped []string) {
+// machineLocalProject is a registry project checked out on a given machine,
+// paired with the working-tree path recorded for that machine.
+type machineLocalProject struct {
+	key       string
+	localPath string
+	proj      *registry.Project
+}
+
+// machineLocalProjects splits the registry into projects checked out on
+// machineName (in stable key order, each with its recorded working-tree path)
+// and the keys of projects checked out only on other machines. It is the shared
+// basis for every "act on this machine's projects" command (reset, restore --all).
+func machineLocalProjects(reg *registry.Registry, machineName string) (local []machineLocalProject, elsewhere []string) {
 	keys := make([]string, 0, len(reg.Projects))
 	for key := range reg.Projects {
 		keys = append(keys, key)
@@ -297,14 +307,24 @@ func planReset(reg *registry.Registry, machineName string) (targets []resetTarge
 		}
 		m, ok := proj.Machines[machineName]
 		if !ok || m.LocalPath == "" {
-			skipped = append(skipped, key)
+			elsewhere = append(elsewhere, key)
 			continue
 		}
+		local = append(local, machineLocalProject{key: key, localPath: m.LocalPath, proj: proj})
+	}
+	return local, elsewhere
+}
+
+// planReset maps this machine's projects to reset targets (display-named for the
+// human-readable plan) and returns the keys skipped because they live elsewhere.
+func planReset(reg *registry.Registry, machineName string) (targets []resetTarget, skipped []string) {
+	local, skipped := machineLocalProjects(reg, machineName)
+	for _, p := range local {
 		targets = append(targets, resetTarget{
-			key:       key,
-			name:      displayOr(proj.DisplayName, key),
-			localPath: m.LocalPath,
-			proj:      proj,
+			key:       p.key,
+			name:      displayOr(p.proj.DisplayName, p.key),
+			localPath: p.localPath,
+			proj:      p.proj,
 		})
 	}
 	return targets, skipped
@@ -376,7 +396,7 @@ func resetProject(
 }
 
 func init() {
-	resetCmd.Flags().BoolVar(&resetYes, "yes", false, "Skip confirmation prompt")
+	resetCmd.Flags().BoolVarP(&resetYes, "yes", "y", false, "Skip confirmation prompt")
 	resetCmd.Flags().BoolVar(&resetRemote, "remote", false, "Also wipe the shared remote store and its history (decommission everywhere)")
 	rootCmd.AddCommand(resetCmd)
 }
