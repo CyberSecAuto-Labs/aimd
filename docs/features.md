@@ -281,10 +281,27 @@ the rest.
 
 reset prints what it will do and requires `--yes` to skip the confirmation prompt.
 
+### Wiping the remote too
+
+With `--remote`, reset also tears down the **shared remote store**: after restoring
+this machine's files it removes every project everywhere and replaces the remote's
+history with a single empty commit (force-push). This is a full decommission —
+every other machine sees an empty store on its next sync.
+
+`--remote` requires typing the remote URL to confirm; `--yes` does **not** bypass
+that gate. If the local restore can't finish, reset aborts **before** touching the
+remote, so the remote is never destroyed while local teardown is incomplete.
+
+aimd can only restore files on the machine that runs reset. Projects checked out on
+**other** machines are removed from the remote but left as broken symlinks there
+until each of those machines runs its own `aimd reset` (then re-runs `aimd init`).
+
 ```
 aimd reset
+aimd reset --remote
 ```
 
 | Flag | Description |
 |---|---|
-| `--yes` | Skip confirmation prompt |
+| `--yes` | Skip confirmation prompt (local reset only; ignored for `--remote`) |
+| `--remote` | Also wipe the shared remote store and its history (decommission everywhere) |
