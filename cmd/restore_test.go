@@ -119,7 +119,7 @@ func TestRunRestore_CreatesSymlink(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(orig) }()
 
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &bytes.Buffer{}); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunRestore() error = %v", err)
 	}
 
@@ -169,12 +169,12 @@ func TestRunRestore_Idempotent(t *testing.T) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	var out1 bytes.Buffer
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &out1); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &out1); err != nil {
 		t.Fatalf("RunRestore() first run error = %v", err)
 	}
 
 	var out2 bytes.Buffer
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &out2); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &out2); err != nil {
 		t.Fatalf("RunRestore() second run error = %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestRunRestore_BrokenSymlink(t *testing.T) {
 		t.Fatalf("creating broken symlink: %v", err)
 	}
 
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &bytes.Buffer{}); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunRestore() error = %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestRunRestore_MissingOverlay(t *testing.T) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	var out bytes.Buffer
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &out); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &out); err != nil {
 		t.Fatalf("RunRestore() error = %v", err)
 	}
 
@@ -339,7 +339,7 @@ func TestRunRestore_RealFile_NoForce(t *testing.T) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	var out bytes.Buffer
-	if err := cmd.RunRestore(storeDir, "new-machine", false, false, &out); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, false, false, &out); err != nil {
 		t.Fatalf("RunRestore() error = %v", err)
 	}
 
@@ -395,7 +395,7 @@ func TestRunRestore_RealFile_Force(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(orig) }()
 
-	if err := cmd.RunRestore(storeDir, "new-machine", true, false, &bytes.Buffer{}); err != nil {
+	if err := cmd.RunRestore(storeDir, "new-machine", false, true, false, &bytes.Buffer{}); err != nil {
 		t.Fatalf("RunRestore(force) error = %v", err)
 	}
 
@@ -438,7 +438,7 @@ func TestRunRestore_StoreNotInitialized(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(orig) }()
 
-	err = cmd.RunRestore(storeDir, "test-machine", false, false, &bytes.Buffer{})
+	err = cmd.RunRestore(storeDir, "test-machine", false, false, false, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error when store does not exist, got nil")
 	}
@@ -481,7 +481,7 @@ func TestRunRestore_RejectsTrackedPathOutsideProjectRoot(t *testing.T) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	// --force would otherwise replace the real file with a store symlink.
-	err = cmd.RunRestore(storeDir, "new-machine", true, false, &bytes.Buffer{})
+	err = cmd.RunRestore(storeDir, "new-machine", false, true, false, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error restoring a tracked path outside the project root, got nil")
 	}
@@ -542,7 +542,7 @@ func TestRunRestore_DirectoryAtDestination(t *testing.T) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	var buf bytes.Buffer
-	if err := cmd.RunRestore(storeDir, "test-machine", false, false, &buf); err != nil {
+	if err := cmd.RunRestore(storeDir, "test-machine", false, false, false, &buf); err != nil {
 		t.Fatalf("RunRestore() unexpected error: %v", err)
 	}
 

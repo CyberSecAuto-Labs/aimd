@@ -15,7 +15,10 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
-var restoreForce bool
+var (
+	restoreForce bool
+	restoreAll   bool
+)
 
 var restoreCmd = &cobra.Command{
 	Use:     "restore",
@@ -24,10 +27,15 @@ var restoreCmd = &cobra.Command{
 	Long: `Pull the latest store state, then re-create symlinks for every tracked
 file that belongs to the current project.
 
+Use --all to restore every project checked out on this machine in one pass —
+the usual first step after cloning the store onto a new machine, instead of
+visiting each project directory and running restore there. Projects registered
+only on other machines are skipped (their working tree isn't here to restore).
+
 By default restore warns and skips any destination that is an existing real
 file. Use --force to replace real files with store overlays.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return RunRestore(storePath, machine, restoreForce, dryRun, cmd.OutOrStdout())
+		return RunRestore(storePath, machine, restoreAll, restoreForce, dryRun, cmd.OutOrStdout())
 	},
 }
 
@@ -35,10 +43,12 @@ file. Use --force to replace real files with store overlays.`,
 //
 // storeDir is the resolved path to ~/.aimd/store.
 // machineName identifies the current machine.
+// all restores every project checked out on this machine instead of just the
+// current one (detected from the working directory).
 // force replaces existing real files when true.
 // dryRun prints what would happen without making changes.
 // out receives all user-facing output.
-func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer) error {
+func RunRestore(storeDir, machineName string, all, force, dryRun bool, out io.Writer) error {
 	// Pre-check: store must exist and be a git repo before anything else.
 	if err := verifyStore(storeDir); err != nil {
 		return err
@@ -55,35 +65,38 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		defer release()
 	}
 
-	// Step 1: Pull the store (warn on failure, continue).
+	// Pull the store (warn on failure, continue).
 	pullOut, pullErr := store.Pull(storeDir)
 	if pullErr != nil {
 		_, _ = fmt.Fprintf(out, "warning: could not pull store — restoring from local state: %s\n", pullOut)
 	}
 
-	// Step 2: Determine link mode from config (fail fast on an unsupported mode,
-	// before any destructive file replacement under --force).
+	// Determine link mode from config (fail fast on an unsupported mode, before
+	// any destructive file replacement under --force).
 	linkMode, err := loadLinkMode()
 	if err != nil {
 		return fmt.Errorf("link mode: %w", err)
 	}
 
-	// Step 3: Detect project.
-	proj, err := project.Detect()
-	if err != nil {
-		return fmt.Errorf("detecting project: %w", err)
-	}
-
-	// Step 4: Load registry.
 	registryPath := filepath.Join(storeDir, ".aimd", "registry.json")
 	reg, err := registry.LoadOrNew(registryPath)
 	if err != nil {
 		return fmt.Errorf("loading registry: %w", err)
 	}
 
+	if all {
+		return restoreAllProjects(storeDir, machineName, force, dryRun, reg, registryPath, linkMode, out)
+	}
+
+	// Single project: detect from the current working directory.
+	proj, err := project.Detect()
+	if err != nil {
+		return fmt.Errorf("detecting project: %w", err)
+	}
+
 	projEntry, ok := registry.GetProject(reg, proj.Key)
 	if !ok || len(projEntry.Tracked) == 0 {
-		_, _ = fmt.Fprintf(out, "no tracked files for project %q\n", proj.Key)
+		_, _ = fmt.Fprintf(out, "No tracked files for project %q.\n", proj.Key)
 		return nil
 	}
 
@@ -92,49 +105,93 @@ func RunRestore(storeDir, machineName string, force, dryRun bool, out io.Writer)
 		return nil
 	}
 
-	// Step 5: Restore each tracked file.
+	n, err := restoreProjectFiles(storeDir, proj.Key, proj.Root, machineName, force, reg, projEntry, registryPath, linkMode, out)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "✓ Restored %d file(s) in %s\n", n, filepath.Base(proj.Root))
+	return nil
+}
+
+// restoreAllProjects restores every project checked out on this machine, into
+// each project's recorded working-tree path. Per-project failures are reported
+// and do not abort the rest (restore is idempotent, so a re-run picks up where a
+// failure left off).
+func restoreAllProjects(storeDir, machineName string, force, dryRun bool, reg *registry.Registry, registryPath string, linkMode link.LinkMode, out io.Writer) error {
+	local, _ := machineLocalProjects(reg, machineName)
+	if len(local) == 0 {
+		_, _ = fmt.Fprintf(out, "No projects checked out on %q — nothing to restore.\n", machineName)
+		return nil
+	}
+
+	if dryRun {
+		var totalFiles int
+		for _, p := range local {
+			totalFiles += len(p.proj.Tracked)
+		}
+		_, _ = fmt.Fprintf(out, "dry-run: would restore %d file(s) across %d project(s)\n", totalFiles, len(local))
+		return nil
+	}
+
+	var totalFiles, doneProjects int
+	for _, p := range local {
+		name := displayOr(p.proj.DisplayName, p.key)
+		n, err := restoreProjectFiles(storeDir, p.key, p.localPath, machineName, force, reg, p.proj, registryPath, linkMode, out)
+		if err != nil {
+			_, _ = fmt.Fprintf(out, "⚠ %s: %v\n", name, err)
+			continue
+		}
+		totalFiles += n
+		doneProjects++
+		_, _ = fmt.Fprintf(out, "✓ Restored %d file(s) in %s\n", n, name)
+	}
+	_, _ = fmt.Fprintf(out, "✓ Restored %d file(s) across %d project(s).\n", totalFiles, doneProjects)
+	return nil
+}
+
+// restoreProjectFiles re-creates the symlinks for one project's tracked files
+// under root, refreshes the .git/info/exclude entries, and persists via the
+// shared ritual only when something actually changed (so an idempotent re-run
+// neither writes the registry nor creates an empty commit). It returns the
+// number of files that were (re)linked.
+func restoreProjectFiles(storeDir, key, root, machineName string, force bool, reg *registry.Registry, projEntry *registry.Project, registryPath string, linkMode link.LinkMode, out io.Writer) (int, error) {
 	var restoredPaths []string
 	for _, tf := range projEntry.Tracked {
 		// Reject a registry path that escapes the project root before any file op.
 		if pathEscapesRoot(tf.Path) {
-			return fmt.Errorf("%s is outside the project root — skipping", tf.Path)
+			return 0, fmt.Errorf("%s is outside the project root — skipping", tf.Path)
 		}
 
-		overlaySrc := filepath.Join(storeDir, "repos", proj.Key, tf.Path)
-		projectDst := filepath.Join(proj.Root, tf.Path)
+		overlaySrc := filepath.Join(storeDir, "repos", key, tf.Path)
+		projectDst := filepath.Join(root, tf.Path)
 
 		restored, err := restoreFile(overlaySrc, projectDst, tf.Path, linkMode, force, out)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if restored {
 			restoredPaths = append(restoredPaths, tf.Path)
 		}
 	}
 
-	// Step 6: Update .git/info/exclude for all tracked files (idempotent).
-	excludePath := filepath.Join(proj.Root, ".git", "info", "exclude")
+	excludePath := filepath.Join(root, ".git", "info", "exclude")
 	for _, tf := range projEntry.Tracked {
 		if err := exclude.AppendEntry(excludePath, tf.Path); err != nil {
-			return fmt.Errorf("updating .git/info/exclude for %s: %w", tf.Path, err)
+			return 0, fmt.Errorf("updating .git/info/exclude for %s: %w", tf.Path, err)
 		}
 	}
 
-	// Step 7: Persist via the shared ritual — but only when something was actually
-	// restored, so an idempotent re-run neither writes the registry nor creates an
-	// empty commit.
 	if len(restoredPaths) > 0 {
-		if perr := persistChange(storeDir, proj.Key, proj.Root, "restore", machineName, reg, projEntry, registryPath, restoredPaths, out); perr != nil {
-			return perr
+		if perr := persistChange(storeDir, key, root, "restore", machineName, reg, projEntry, registryPath, restoredPaths, out); perr != nil {
+			return 0, perr
 		}
 	}
-
-	_, _ = fmt.Fprintf(out, "✓ Restored %d file(s) in %s\n", len(restoredPaths), filepath.Base(proj.Root))
-	return nil
+	return len(restoredPaths), nil
 }
 
 func init() {
 	restoreCmd.Flags().BoolVar(&restoreForce, "force", false, "Replace existing real files with store overlays")
+	restoreCmd.Flags().BoolVar(&restoreAll, "all", false, "Restore every project checked out on this machine, not just the current one")
 	rootCmd.AddCommand(restoreCmd)
 }
 
