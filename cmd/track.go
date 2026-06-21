@@ -120,6 +120,8 @@ func RunTrack(targets []string, storeDir, machineName string, dryRun bool, out i
 		if perr := persistChange(storeDir, proj.Key, proj.Root, "track", machineName, reg, projEntry, registryPath, trackedRelPaths, out); perr != nil {
 			return errors.Join(trackErr, perr)
 		}
+		// Point at how edits propagate from here, so tracking isn't a dead end.
+		_, _ = fmt.Fprintf(out, "\nTip: run `aimd watch` to auto-sync edits, or `aimd sync` after changes.\n")
 	}
 
 	return trackErr
