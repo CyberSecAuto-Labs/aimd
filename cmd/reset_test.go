@@ -67,7 +67,7 @@ func TestRunReset_RestoresAllProjectsOnMachine(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), &out); err != nil {
+	if err := cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunReset error = %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestRunReset_DryRunChangesNothing(t *testing.T) {
 	_, claude := trackFileInNewProject(t, storeDir, base, "projA", "CLAUDE.md", "# A\n")
 
 	var out bytes.Buffer
-	if err := cmd.RunReset(storeDir, "test-machine", true, true, strings.NewReader(""), &out); err != nil {
+	if err := cmd.RunReset(storeDir, "test-machine", true, true, false, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunReset(dry-run) error = %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestRunReset_PartialFailureIsRetryable(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), &out); err == nil {
+	if err := cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), &out); err == nil {
 		t.Fatal("expected reset to fail because B.md's overlay is missing")
 	}
 
@@ -191,7 +191,7 @@ func TestRunReset_PartialFailureIsRetryable(t *testing.T) {
 
 	// Second attempt retries only B.md — A.md is no longer tracked.
 	var out2 bytes.Buffer
-	if err := cmd.RunReset(storeDir, "test-machine", true, false, strings.NewReader(""), &out2); err == nil {
+	if err := cmd.RunReset(storeDir, "test-machine", true, false, false, strings.NewReader(""), &out2); err == nil {
 		t.Fatal("second reset should still fail on B.md")
 	}
 	if strings.Contains(out2.String(), "A.md") {
@@ -214,7 +214,7 @@ func TestRunReset_SkipsProjectsNotOnThisMachine(t *testing.T) {
 
 	// Reset as a different machine — the only project belongs to "test-machine".
 	var out bytes.Buffer
-	if err := cmd.RunReset(storeDir, "other-machine", true, false, strings.NewReader(""), &out); err != nil {
+	if err := cmd.RunReset(storeDir, "other-machine", true, false, false, strings.NewReader(""), &out); err != nil {
 		t.Fatalf("RunReset error = %v", err)
 	}
 
