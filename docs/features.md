@@ -104,10 +104,16 @@ Restore tracked files as symlinks in the current project.
 Pull the latest store state, then re-create symlinks for every tracked file
 that belongs to the current project.
 
-Use `--all` to restore every project checked out on this machine in one pass —
-the usual first step after cloning the store onto a new machine, instead of
-visiting each project directory in turn. Projects registered only on other
-machines are skipped.
+Use `--all` to restore every project already checked out on this machine in one
+pass — handy when the symlinks have been cleared locally, instead of visiting
+each project directory in turn. Only projects this machine has checked out before
+are restored; one registered solely on another machine is skipped, since the
+registry has no working-tree path for it here.
+
+On a brand-new machine the store's projects aren't yet associated with this
+hostname, so `--all` finds nothing. cd into each project and run a plain
+`aimd restore` once to materialise its files and register the machine; `--all`
+will pick those projects up afterwards.
 
 By default restore warns and skips any destination that is an existing real
 file. Use `--force` to replace real files with store overlays.

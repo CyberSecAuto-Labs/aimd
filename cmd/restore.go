@@ -27,10 +27,12 @@ var restoreCmd = &cobra.Command{
 	Long: `Pull the latest store state, then re-create symlinks for every tracked
 file that belongs to the current project.
 
-Use --all to restore every project checked out on this machine in one pass —
-the usual first step after cloning the store onto a new machine, instead of
-visiting each project directory and running restore there. Projects registered
-only on other machines are skipped (their working tree isn't here to restore).
+Use --all to restore every project already checked out on this machine in one
+pass — handy when the symlinks have been cleared locally, instead of visiting
+each project directory and running restore there. Only projects this machine has
+checked out before are restored; one registered solely on another machine is
+skipped, since the registry has no working-tree path for it here. On a brand-new
+machine, cd into each project and run a plain restore there once to register it.
 
 By default restore warns and skips any destination that is an existing real
 file. Use --force to replace real files with store overlays.`,
