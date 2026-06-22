@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload grype SARIF to Security tab
         if: always()   # surface findings even when the gate fails the build
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: grype
