@@ -20,7 +20,7 @@ Keep your private AI context files (`CLAUDE.md`, `AGENTS.md`) out of shared repo
 # Track a file — moves it to your private store, symlinks it back
 aimd track CLAUDE.md
 
-# On another machine — restore the symlink after a fresh clone
+# On another machine — cd into a project and restore its symlinks
 aimd restore
 
 # Keep the store in sync

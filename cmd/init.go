@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
+	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
 
@@ -93,7 +94,7 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 			}
 			answer := strings.TrimSpace(strings.ToLower(line))
 			if answer != "y" && answer != "yes" {
-				_, _ = fmt.Fprintln(out, "aborted")
+				_, _ = fmt.Fprintln(out, "Aborted.")
 				return nil
 			}
 		}
@@ -136,7 +137,32 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 	// Step 8: success message.
 	_, _ = fmt.Fprintf(out, "✓ aimd store initialised\n  remote: %s\n  store:  %s\n  machine: %s\n",
 		url, storeDir, machineName)
+
+	// Step 9: point at the obvious next step.
+	printInitNextStep(out, registryPath, machineName)
 	return nil
+}
+
+// printInitNextStep points the user at what to do after init. The right next
+// step depends on what the freshly-loaded registry holds for this machine:
+//
+//   - projects already checked out here → `restore --all` re-links them all at once;
+//   - projects tracked only on other machines → this hostname isn't in the registry
+//     yet, so `restore --all` would find nothing; the user must cd into each project
+//     and run `aimd restore` once to register this machine before --all can see it;
+//   - a brand-new (empty) store → start tracking.
+func printInitNextStep(out io.Writer, registryPath, machineName string) {
+	reg, regErr := registry.LoadOrNew(registryPath)
+	if regErr != nil || len(reg.Projects) == 0 {
+		_, _ = fmt.Fprintf(out, "\nNext: cd into a project and run `aimd track <file>` to start tracking.\n")
+		return
+	}
+	if local, _ := machineLocalProjects(reg, machineName); len(local) > 0 {
+		_, _ = fmt.Fprintf(out, "\nNext: run `aimd restore --all` to materialise your tracked files.\n")
+		return
+	}
+	// The store holds projects, but none checked out on this machine yet.
+	_, _ = fmt.Fprintf(out, "\nNext: cd into each of your projects and run `aimd restore` to re-link its tracked files.\n")
 }
 
 // cloneOrInit sets up the store at storeDir from the given remote URL.

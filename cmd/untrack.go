@@ -395,6 +395,6 @@ func confirmPrompt(out io.Writer, in io.Reader, msg string) (bool, error) {
 
 func init() {
 	untrackCmd.Flags().BoolVar(&untrackDelete, "delete", false, "Remove symlink and overlay only (no restore); content will be lost")
-	untrackCmd.Flags().BoolVar(&untrackYes, "yes", false, "Skip confirmation prompt")
+	untrackCmd.Flags().BoolVarP(&untrackYes, "yes", "y", false, "Skip confirmation prompt")
 	rootCmd.AddCommand(untrackCmd)
 }

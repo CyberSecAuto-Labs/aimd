@@ -89,6 +89,10 @@ func TestRunInit_NewStore(t *testing.T) {
 	if !strings.Contains(output, "✓ aimd store initialised") {
 		t.Errorf("output does not contain success message:\n%s", output)
 	}
+	// A brand-new empty store points the user at tracking, not restore.
+	if !strings.Contains(output, "aimd track") {
+		t.Errorf("output does not contain the next-step track hint:\n%s", output)
+	}
 }
 
 func TestRunInit_AlreadyInitialisedSameURL(t *testing.T) {
@@ -260,8 +264,8 @@ func TestRunInit_AlreadyInitialisedDifferentURL_Decline(t *testing.T) {
 	}
 
 	output := out.String()
-	if !strings.Contains(output, "aborted") {
-		t.Errorf("expected 'aborted' in output, got:\n%s", output)
+	if !strings.Contains(output, "Aborted.") {
+		t.Errorf("expected 'Aborted.' in output, got:\n%s", output)
 	}
 
 	// Config should remain unchanged.

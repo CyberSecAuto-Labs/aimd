@@ -174,7 +174,7 @@ func TestRunStatus_Synced(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -218,7 +218,7 @@ func TestRunStatus_Modified(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -262,7 +262,7 @@ func TestRunStatus_Modified_PerFile(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -300,7 +300,7 @@ func TestRunStatus_Broken(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -343,7 +343,7 @@ func TestRunStatus_Conflict(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -405,7 +405,7 @@ func TestRunStatus_Conflict_ModifyDelete(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -435,7 +435,7 @@ func TestRunStatus_EmptyRegistry(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus: %v", err)
 	}
 	got := out.String()
@@ -468,7 +468,7 @@ func TestRunStatus_All_EmptyProjectShowsRemoveHint(t *testing.T) {
 	}})
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus --all: %v", err)
 	}
 	got := out.String()
@@ -504,7 +504,7 @@ func TestRunStatus_All_EmptyProjectHintKeyResolvesOnNameCollision(t *testing.T) 
 	})
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus --all: %v", err)
 	}
 	got := out.String()
@@ -569,7 +569,7 @@ func TestRunStatus_All_CrossMachine(t *testing.T) {
 	symlinkOverlay(t, storeDir, "github.com~test~appB", appB, "AGENTS.md")
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", true, true, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", true, true, false, false, &out); err != nil {
 		t.Fatalf("RunStatus --all --all-machines: %v", err)
 	}
 	got := out.String()
@@ -616,7 +616,7 @@ func TestRunStatus_All_WithoutAllMachines_NoCrossMachine(t *testing.T) {
 
 	var out bytes.Buffer
 	// all=true, allMachines=false
-	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", true, false, false, false, &out); err != nil {
 		t.Fatalf("RunStatus --all: %v", err)
 	}
 	got := out.String()
@@ -682,7 +682,7 @@ func TestRunStatus_RelativeTimeBranches(t *testing.T) {
 			chdir(t, projectDir)
 
 			var out bytes.Buffer
-			if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &out); err != nil {
+			if err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &out); err != nil {
 				t.Fatalf("RunStatus: %v", err)
 			}
 			if !strings.Contains(out.String(), tc.want) {
@@ -750,7 +750,7 @@ func TestRunStatus_FetchBehind(t *testing.T) {
 	chdir(t, projectDir)
 
 	var out bytes.Buffer
-	if err := cmd.RunStatus(storeDir, "this-machine", false, false, true, &out); err != nil {
+	if err := cmd.RunStatus(storeDir, "this-machine", false, false, true, false, &out); err != nil {
 		t.Fatalf("RunStatus --fetch: %v", err)
 	}
 	got := out.String()
@@ -777,7 +777,7 @@ func TestRunStatus_NotInProject_NoAll(t *testing.T) {
 
 	chdir(t, nonRepo)
 
-	err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &bytes.Buffer{})
+	err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error outside a tracked project without --all")
 	}
@@ -798,7 +798,7 @@ func TestRunStatus_StoreNotInitialized(t *testing.T) {
 
 	chdir(t, projectDir)
 
-	err := cmd.RunStatus(storeDir, "this-machine", false, false, false, &bytes.Buffer{})
+	err := cmd.RunStatus(storeDir, "this-machine", false, false, false, false, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected error when store missing")
 	}

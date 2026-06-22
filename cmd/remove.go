@@ -171,6 +171,6 @@ func resolveRemoveTarget(args []string, reg *registry.Registry) (string, *regist
 
 func init() {
 	removeCmd.Flags().BoolVar(&removeForce, "force", false, "Remove even if the project still has tracked files")
-	removeCmd.Flags().BoolVar(&removeYes, "yes", false, "Skip confirmation prompt")
+	removeCmd.Flags().BoolVarP(&removeYes, "yes", "y", false, "Skip confirmation prompt")
 	rootCmd.AddCommand(removeCmd)
 }

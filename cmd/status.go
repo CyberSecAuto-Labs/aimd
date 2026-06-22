@@ -12,6 +12,7 @@ import (
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
+	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
@@ -36,7 +37,7 @@ the store against the last-fetched origin/main without contacting the remote.
 Pass --fetch to refresh the remote-tracking ref first.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return RunStatus(storePath, machine, statusAll, statusAllMachines, statusFetch, cmd.OutOrStdout())
+		return RunStatus(storePath, machine, statusAll, statusAllMachines, statusFetch, verbose, cmd.OutOrStdout())
 	},
 }
 
@@ -70,8 +71,10 @@ func (s fileState) icon() string {
 // all reports every tracked project instead of just the current one.
 // allMachines lists the other machines tracking each reported project.
 // fetch refreshes origin/main before comparing the store (otherwise offline).
+// verbose expands the --all roster from one summary line per project to the full
+// per-file detail.
 // out receives all user-facing output.
-func RunStatus(storeDir, machineName string, all, allMachines, fetch bool, out io.Writer) error {
+func RunStatus(storeDir, machineName string, all, allMachines, fetch, verbose bool, out io.Writer) error {
 	if err := verifyStore(storeDir); err != nil {
 		return err
 	}
@@ -119,7 +122,15 @@ func RunStatus(storeDir, machineName string, all, allMachines, fetch bool, out i
 	}
 	printHeader(out, storeDir, machineName, reg, keys, fetch)
 
+	// `status --all` defaults to a compact one-line-per-project roster; -v expands
+	// it to the full per-file detail, as does --all-machines (which asks for
+	// per-project machine detail). A single-project status is always detailed.
+	compact := all && !verbose && !allMachines
 	for _, t := range targets {
+		if compact {
+			printProjectCompact(out, storeDir, reg.Projects[t.key], t.key, t.root, linkMode)
+			continue
+		}
 		printProject(out, storeDir, machineName, reg.Projects[t.key], t.key, t.root, linkMode, allMachines)
 	}
 
@@ -184,6 +195,15 @@ func printHeader(out io.Writer, storeDir, machineName string, reg *registry.Regi
 	} else {
 		_, _ = fmt.Fprintf(out, "%s · last sync %s\n", syncLine, relativeTime(last))
 	}
+
+	// Surface whether auto-sync is active, so a user can tell at a glance whether
+	// edits propagate on their own or need a manual `aimd sync`. Best-effort: a
+	// probe error is treated as "not running" rather than failing the report.
+	if running, _ := lock.WatchRunning(storeDir); running {
+		_, _ = fmt.Fprintln(out, "watch: running")
+	} else {
+		_, _ = fmt.Fprintln(out, "watch: not running — edits sync on `aimd sync`")
+	}
 	_, _ = fmt.Fprintln(out)
 }
 
@@ -246,6 +266,11 @@ func storeSyncLine(storeDir string, fetch bool) string {
 	case store.StateAhead:
 		return "store: local changes not pushed · run `aimd sync`"
 	default:
+		// Offline up-to-date looks identical to a freshly-fetched up-to-date, so
+		// qualify it: the result reflects the last-fetched ref, not a live check.
+		if offline {
+			return "store: up to date (offline — run `aimd status --fetch` to check the remote)"
+		}
 		return "store: up to date"
 	}
 }
@@ -288,6 +313,34 @@ func printProject(out io.Writer, storeDir, machineName string, proj *registry.Pr
 	if allMachines {
 		printCrossMachine(out, proj, machineName)
 	}
+}
+
+// printProjectCompact prints one roster line per project: the worst per-file
+// state, the display name, and the tracked-file count. It is the default for
+// `status --all`; -v switches back to printProject's full per-file detail.
+func printProjectCompact(out io.Writer, storeDir string, proj *registry.Project, key, root string, linkMode link.LinkMode) {
+	if proj == nil {
+		return
+	}
+	name := displayOr(proj.DisplayName, key)
+
+	if len(proj.Tracked) == 0 {
+		// A lingering project whose last file was untracked. Key, not name, in the
+		// hint: names collide across remotes and `aimd remove` rejects an ambiguous
+		// one, whereas the key is always unique and copy-pasteable.
+		_, _ = fmt.Fprintf(out, "  %s — no tracked files (run `aimd remove %s` to forget)\n", name, key)
+		return
+	}
+
+	worst := stateSynced
+	for _, tf := range proj.Tracked {
+		overlaySrc := filepath.Join(storeDir, "repos", key, tf.Path)
+		projectDst := filepath.Join(root, tf.Path)
+		if st := computeFileState(storeDir, key, tf.Path, overlaySrc, projectDst, linkMode); st > worst {
+			worst = st
+		}
+	}
+	_, _ = fmt.Fprintf(out, "  %s %s (%s)\n", worst.icon(), name, pluralize(len(proj.Tracked), "file"))
 }
 
 func stateNote(st fileState) string {

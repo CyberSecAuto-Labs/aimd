@@ -104,15 +104,28 @@ Restore tracked files as symlinks in the current project.
 Pull the latest store state, then re-create symlinks for every tracked file
 that belongs to the current project.
 
+Use `--all` to restore every project already checked out on this machine in one
+pass — handy when the symlinks have been cleared locally, instead of visiting
+each project directory in turn. Only projects this machine has checked out before
+are restored; one registered solely on another machine is skipped, since the
+registry has no working-tree path for it here.
+
+On a brand-new machine the store's projects aren't yet associated with this
+hostname, so `--all` finds nothing. cd into each project and run a plain
+`aimd restore` once to materialise its files and register the machine; `--all`
+will pick those projects up afterwards.
+
 By default restore warns and skips any destination that is an existing real
 file. Use `--force` to replace real files with store overlays.
 
 ```
 aimd restore
+aimd restore --all
 ```
 
 | Flag | Description |
 |---|---|
+| `--all` | Restore every project checked out on this machine, not just the current one |
 | `--force` | Replace existing real files with store overlays |
 
 ## aimd status
@@ -122,20 +135,27 @@ Show the sync state of tracked AI context files.
 Inspect tracked files and the store without modifying anything.
 
 By default status reports the current project only. Use `--all` to report every
-tracked project. Use `--all-machines` to also list the other machines tracking
-each reported project. status is read-only and offline by default: it compares
-the store against the last-fetched `origin/main` without contacting the remote.
+tracked project as a compact one-line-per-project roster (worst-state glyph plus
+file count); add `-v`/`--verbose` to expand it to the full per-file detail.
+Use `--all-machines` to also list the other machines tracking each reported
+project. The header also shows whether an `aimd watch` is currently running.
+
+status is read-only and offline by default: it compares the store against the
+last-fetched `origin/main` without contacting the remote (the sync line says so).
 Pass `--fetch` to refresh the remote-tracking ref first.
 
 ```
 aimd status
+aimd status --all       # compact roster
+aimd status --all -v    # full per-file detail
 ```
 
 | Flag | Description |
 |---|---|
-| `--all` | Report every tracked project, not just the current one |
+| `--all` | Report every tracked project (compact roster; `-v` for full detail) |
 | `--all-machines` | List the other machines tracking each reported project |
 | `--fetch` | Fetch `origin/main` before reporting store sync state |
+| `--verbose`, `-v` | Expand the `--all` roster to the full per-file detail |
 
 ## aimd watch
 
