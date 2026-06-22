@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 )
 
 var (
@@ -14,6 +16,7 @@ var (
 	machine   string
 	dryRun    bool
 	verbose   bool
+	colorMode string
 )
 
 var rootCmd = &cobra.Command{
@@ -26,6 +29,9 @@ files to the project repository.
 It uses .git/info/exclude to hide tracked files from git status and
 symlinks to make them available in the project directory.`,
 	PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		if err := output.SetMode(colorMode); err != nil {
+			return fmt.Errorf("configuring output: %w", err)
+		}
 		if machine == "" {
 			h, err := os.Hostname()
 			if err != nil {
@@ -71,4 +77,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&machine, "machine", "", "Machine name override (default: system hostname)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would happen without making changes")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "Colorize output: auto, always, or never")
 }

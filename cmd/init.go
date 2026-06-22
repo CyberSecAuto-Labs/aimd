@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
@@ -94,7 +95,7 @@ func RunInit(url, storeDir, machineName, cfgPath string, yes bool, in io.Reader,
 			}
 			answer := strings.TrimSpace(strings.ToLower(line))
 			if answer != "y" && answer != "yes" {
-				_, _ = fmt.Fprintln(out, "Aborted.")
+				_, _ = fmt.Fprintln(out, output.Colorize(out, output.Red, "Aborted."))
 				return nil
 			}
 		}

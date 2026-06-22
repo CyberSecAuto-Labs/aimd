@@ -13,6 +13,7 @@ import (
 	"github.com/CyberSecAuto-Labs/aimd/internal/config"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
@@ -62,6 +63,25 @@ func (s fileState) icon() string {
 	default:
 		return "✓"
 	}
+}
+
+// color is the semantic color for the state's glyph: red for the problem states
+// (conflict, broken), yellow for local edits, green for synced.
+func (s fileState) color() output.Color {
+	switch s {
+	case stateConflict, stateBroken:
+		return output.Red
+	case stateModified:
+		return output.Yellow
+	default:
+		return output.Green
+	}
+}
+
+// coloredIcon returns the state's glyph colorized for out (plain when color is
+// disabled for that writer).
+func coloredIcon(out io.Writer, s fileState) string {
+	return output.Colorize(out, s.color(), s.icon())
 }
 
 // RunStatus is the testable core of the status command.
@@ -304,9 +324,9 @@ func printProject(out io.Writer, storeDir, machineName string, proj *registry.Pr
 		st := computeFileState(storeDir, key, tf.Path, overlaySrc, projectDst, linkMode)
 		note := stateNote(st)
 		if note != "" {
-			_, _ = fmt.Fprintf(out, "  %s %s    %s\n", st.icon(), tf.Path, note)
+			_, _ = fmt.Fprintf(out, "  %s %s    %s\n", coloredIcon(out, st), tf.Path, note)
 		} else {
-			_, _ = fmt.Fprintf(out, "  %s %s\n", st.icon(), tf.Path)
+			_, _ = fmt.Fprintf(out, "  %s %s\n", coloredIcon(out, st), tf.Path)
 		}
 	}
 
@@ -340,7 +360,7 @@ func printProjectCompact(out io.Writer, storeDir string, proj *registry.Project,
 			worst = st
 		}
 	}
-	_, _ = fmt.Fprintf(out, "  %s %s (%s)\n", worst.icon(), name, pluralize(len(proj.Tracked), "file"))
+	_, _ = fmt.Fprintf(out, "  %s %s (%s)\n", coloredIcon(out, worst), name, pluralize(len(proj.Tracked), "file"))
 }
 
 func stateNote(st fileState) string {

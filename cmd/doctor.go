@@ -11,6 +11,7 @@ import (
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/exclude"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
@@ -67,6 +68,25 @@ func (s checkStatus) icon() string {
 	default:
 		return "✓"
 	}
+}
+
+// color is the semantic color for the check's glyph: red for a failure, yellow
+// for a warning, green for a pass.
+func (s checkStatus) color() output.Color {
+	switch s {
+	case checkFail:
+		return output.Red
+	case checkWarn:
+		return output.Yellow
+	default:
+		return output.Green
+	}
+}
+
+// coloredCheckIcon returns the check's glyph colorized for out (plain when color
+// is disabled for that writer).
+func coloredCheckIcon(out io.Writer, s checkStatus) string {
+	return output.Colorize(out, s.color(), s.icon())
 }
 
 // RunDoctor is the testable core of the doctor command.
@@ -136,16 +156,16 @@ func RunDoctor(storeDir, machineName string, all bool, out io.Writer) error {
 	_, _ = fmt.Fprintln(out)
 	switch {
 	case failures > 0:
-		_, _ = fmt.Fprintf(out, "✗ %s found. Run the suggested fix commands above.\n", pluralize(failures, "problem"))
+		_, _ = fmt.Fprintf(out, "%s %s found. Run the suggested fix commands above.\n", coloredCheckIcon(out, checkFail), pluralize(failures, "problem"))
 		return errDoctorProblems
 	case warnings > 0:
 		// Warnings (e.g. an unreachable remote while offline) are surfaced but do
 		// not gate: the exit stays 0 while the summary honestly reflects them
 		// rather than claiming an all-clear.
-		_, _ = fmt.Fprintf(out, "⚠ %s found; no blocking problems.\n", pluralize(warnings, "warning"))
+		_, _ = fmt.Fprintf(out, "%s %s found; no blocking problems.\n", coloredCheckIcon(out, checkWarn), pluralize(warnings, "warning"))
 		return nil
 	default:
-		_, _ = fmt.Fprintf(out, "✓ All checks passed.\n")
+		_, _ = fmt.Fprintf(out, "%s All checks passed.\n", coloredCheckIcon(out, checkOK))
 		return nil
 	}
 }
@@ -164,7 +184,7 @@ type checkResult struct {
 // Only failures gate the exit; warnings are surfaced so the summary can report
 // them without claiming an all-clear.
 func reportCheck(out io.Writer, r checkResult) (failures, warnings int) {
-	line := fmt.Sprintf("  %s %s", r.status.icon(), r.label)
+	line := fmt.Sprintf("  %s %s", coloredCheckIcon(out, r.status), r.label)
 	if r.detail != "" {
 		line += " — " + r.detail
 	}
