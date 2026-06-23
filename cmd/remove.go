@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
@@ -102,7 +103,7 @@ func RunRemove(args []string, storeDir, machineName string, force, yes, dryRun b
 	if !yes {
 		confirmed, _ := confirmPrompt(out, in, "Continue?")
 		if !confirmed {
-			_, _ = fmt.Fprintf(out, "Aborted.\n")
+			_, _ = fmt.Fprintf(out, "%s\n", output.Colorize(out, output.Red, "Aborted."))
 			return nil
 		}
 	}

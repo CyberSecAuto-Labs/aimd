@@ -12,6 +12,7 @@ import (
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/exclude"
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/project"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 )
@@ -316,7 +317,7 @@ func untrackFile(
 	if !yes {
 		confirmed, _ := confirmPrompt(out, in, "Continue?")
 		if !confirmed {
-			_, _ = fmt.Fprintf(out, "Aborted.\n")
+			_, _ = fmt.Fprintf(out, "%s\n", output.Colorize(out, output.Red, "Aborted."))
 			return nil
 		}
 	}

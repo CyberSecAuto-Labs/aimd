@@ -13,6 +13,7 @@ import (
 
 	"github.com/CyberSecAuto-Labs/aimd/internal/link"
 	"github.com/CyberSecAuto-Labs/aimd/internal/lock"
+	"github.com/CyberSecAuto-Labs/aimd/internal/output"
 	"github.com/CyberSecAuto-Labs/aimd/internal/registry"
 	"github.com/CyberSecAuto-Labs/aimd/internal/store"
 )
@@ -128,7 +129,7 @@ func RunReset(storeDir, machineName string, yes, dryRun, remote bool, in io.Read
 		if remote {
 			_, _ = fmt.Fprintf(out, "Confirmation did not match — nothing was changed.\n")
 		} else {
-			_, _ = fmt.Fprintf(out, "Aborted.\n")
+			_, _ = fmt.Fprintf(out, "%s\n", output.Colorize(out, output.Red, "Aborted."))
 		}
 		return nil
 	}
